@@ -502,7 +502,7 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     struct mach_timebase_info timebase = {};
     mach_timebase_info(&timebase);
     ivars->ticksPerSecond = 1000000000ull * timebase.denom / timebase.numer;
-    ivars->timerInterval = ivars->ticksPerSecond / 4000; // 250 microseconds
+    ivars->timerInterval = ivars->ticksPerSecond / 2000; // v6 baseline: 500 microseconds
     ivars->settings = OSTypeAlloc(ClarettSettings);
     if (!ivars->settings || !ivars->settings->Configure(this)) return kIOReturnNoMemory;
     ret = device->AddCustomProperty(ivars->settings);

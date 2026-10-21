@@ -12,8 +12,10 @@ constexpr size_t TxSamples = TableBytes;
 constexpr size_t RxTable = TableBytes + Descriptors * TxSlot;
 constexpr size_t RxSamples = (RxTable + TableBytes + 4095) & ~size_t(4095);
 constexpr size_t Bytes = (RxSamples + Descriptors * RxSlot + 16383) & ~size_t(16383);
-constexpr uint32_t Safety = 64;
-constexpr uint32_t Period = 64; // hardware period, distinct from the HAL ring size
+// Restore the v6 hardware-tested margin while diagnosing the low-latency
+// regression. Core Audio's selectable client buffer is a separate setting.
+constexpr uint32_t Safety = 512;
+constexpr uint32_t Period = 256; // hardware period, distinct from the HAL ring size
 inline uint64_t timestampFrame(uint64_t frames) { return frames / Frames * Frames; }
 inline size_t sampleOffset(bool input, uint64_t frame, uint32_t channel) {
     const auto pos = uint32_t(frame % Frames);

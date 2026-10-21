@@ -4,7 +4,7 @@
 
 The user confirmed that hardware direct monitoring works on activated version 8. The registry also reports successful monitor disable and restoration (`off-restored`, error 0, uncertain 0). This is separate from the earlier version 6 tests confirming clear Spotify playback and clear Audacity recording/listen-back.
 
-Software monitoring crackles at multiple Core Audio buffer settings. The user also increased Audacity's own buffer to 100 ms without resolving it. Zero hardware-overrun flags do not establish sample continuity. A cold-reset comparison on the same version 8 build is pending. The source version 10 diagnostic candidate has passed compilation, signature/profile checks, and sanitized tests, but has not yet passed a hardware listening test.
+Software monitoring crackles at multiple Core Audio buffer settings. The user also increased Audacity's own buffer to 100 ms without resolving it. Zero hardware-overrun flags do not establish sample continuity. The crackle persisted after a cold reset on the same version 8 build, making stale volatile hardware state less likely. Version 10 passed compilation, signature/profile checks, sanitized tests and hardware attachment. The user confirmed both live monitoring and ordinary playback crackle on version 10. Version 11 restores the previously clear version 6 timing settings while preserving the controls and diagnostics; macOS accepted it, and the user confirmed both ordinary playback and software monitoring are clear. Hardware attachment reports safety 512 frames and period 256 frames, with zero late output writes, input-ahead callbacks or hardware overruns in the observed test.
 
 Full Security was confirmed by the user earlier with `sudo bputil -d`; SIP was checked independently. No startup-security or management setting was changed.
 
@@ -36,7 +36,11 @@ Version 10 additionally measures maximum poll gap, MMIO read-block duration, eve
 
 Sanitized tests cover route preservation, available mixer resources, 2Pre pins, mono/stereo modes, output pairs, blend headroom, snapshot retention, exact command serialization and command permissions. Protocol and DMA/ring tests continue to pass. Audio and attachment targets compile against Xcode 27.
 
-Pending: cold-reset comparison, diagnostic hardware activation if needed, clean software monitoring with the selected buffer, sustained-load/sleep-wake tests, and measured round-trip latency. No test tone or agent recording is used; the user performs audible tests. Rates other than 48 kHz, external clocking, MIDI and Focusrite Control compatibility remain unsupported.
+Version 10 initial telemetry showed zero late polls, zero input-ahead callbacks, zero late output writes, a maximum poll gap of 516 microseconds and maximum MMIO read-block duration of 46 microseconds. A later extended observation reached one late poll and two input-ahead callbacks (maximum 24 frames, below the 64-frame event quantization). Both runs reported zero hardware overruns. These counters do not identify the audible fault.
+
+Version 11 restores a 512-frame input/output safety offset, 256-frame hardware period and 500-microsecond timer target. These are the version 6 settings that passed clear playback and capture tests. Client buffer selection remains available, but the conservative driver margin adds latency; reliable reduced-latency streaming is not yet claimed.
+
+Pending: reliable reduced-margin streaming below the clear version 11 baseline, sustained-load/sleep-wake tests, and measured round-trip latency. No test tone or agent recording is used; the user performs audible tests. Rates other than 48 kHz, external clocking, MIDI and Focusrite Control compatibility remain unsupported.
 
 ## Primary references
 
