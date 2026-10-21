@@ -1,6 +1,6 @@
 # Clarett DriverKit probe
 
-An experimental macOS DriverKit prototype for the original Focusrite Clarett 2Pre **Thunderbolt** interface. This milestone tests system-extension activation, PCI attachment, and identification queries over the device's mailbox and response DMA. The mailbox milestone passed; the audio stage now exposes experimental playback and capture pending manual verification.
+An experimental macOS DriverKit prototype for the original Focusrite Clarett 2Pre **Thunderbolt** interface. Activation, mailbox identification, clear playback and recording, and direct hardware monitoring have passed manual tests on the test Mac. Software input monitoring currently crackles; the reduced-latency streaming path is still under investigation.
 
 **Hardware milestone passed on 21 October 2026:** version `0.1/4` activated, attached and completed all six mailbox queries on the test Mac, with SIP enabled and Full Security confirmed by the user. See [test evidence and limits](docs/hardware-test-2026-10-21.md).
 
@@ -8,7 +8,7 @@ An experimental macOS DriverKit prototype for the original Focusrite Clarett 2Pr
 
 - **attach** (default, version 1): open PCI endpoint `1cb5:0002`, validate the BAR, disable bus-master DMA, and read the capabilities register. No mailbox commands or device DMA are issued.
 - **mailbox** (version 4): allocate/map a response buffer, establish the mailbox session, and alternate six read-only queries for stream geometry and application/FPGA identification. The session stops on its first transport or validation error.
-- **audio** (version 6): retain the PCI/mailbox session, expose an AudioDriverKit duplex device at 48 kHz, and start hardware streaming when Core Audio opens it. Four playback and fourteen capture transport channels are exposed. The user confirmed clear Spotify playback on version 6; capture is awaiting manual verification.
+- **audio** (source version 10): retain the PCI/mailbox session and expose an AudioDriverKit duplex device at 48 kHz, with four playback and fourteen capture transport channels. Version 6 passed clear Spotify playback and Audacity recording/listen-back. Version 8 adds software buffer controls and hardware direct monitoring; the user confirmed the latter works, but software monitoring crackles at multiple buffer sizes. Version 10 adds timing diagnostics and lifecycle fixes; build/signature validation alone does not establish a successful hardware test.
 
 The PCI identity is shared by multiple Clarett/Red models. The mailbox stage checks the 2Pre's reported transport geometry before issuing firmware-info queries. Transport slots must not be interpreted as physical input counts.
 
@@ -50,7 +50,7 @@ scripts/build.sh audio -allowProvisioningUpdates -allowProvisioningDeviceRegistr
 python3 scripts/verify-signing.py 'build/audio/Build/Products/Debug/Clarett Probe.app'
 ```
 
-This adds the development `com.apple.developer.driverkit.family.audio` entitlement; it must be granted by the embedded profile and real signature. No unrestricted user-client entitlement is used. See [audio implementation and manual test](docs/audio-streaming.md).
+This adds the development `com.apple.developer.driverkit.family.audio` entitlement; it must be granted by the embedded profile and real signature. No unrestricted user-client entitlement is used. See [audio implementation and manual test](docs/audio-streaming.md) and [monitor controls and validation](docs/monitoring-controls.md).
 
 ## Installation and activation
 

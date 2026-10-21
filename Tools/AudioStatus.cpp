@@ -48,6 +48,12 @@ int main() {
         get(device, kAudioDevicePropertyDeviceIsRunningSomewhere, global, &running, size);
         size = sizeof(UInt32); get(device, kAudioDevicePropertyDeviceIsAlive, global, &alive, size);
         size = sizeof(UInt32); get(device, kAudioDevicePropertyBufferFrameSize, global, &frames, size);
+        AudioValueRange range{}; UInt32 rangeSize = sizeof(range);
+        get(device, kAudioDevicePropertyBufferFrameSizeRange, global, &range, rangeSize);
+        UInt32 inputSafety = 0, outputSafety = 0;
+        size = sizeof(UInt32); get(device, kAudioDevicePropertySafetyOffset, kAudioObjectPropertyScopeInput, &inputSafety, size);
+        size = sizeof(UInt32); get(device, kAudioDevicePropertySafetyOffset, kAudioObjectPropertyScopeOutput, &outputSafety, size);
+        std::printf("  Supported buffer range: %.0f–%.0f; safety: input %u / output %u frames\n", range.mMinimum, range.mMaximum, inputSafety, outputSafety);
         std::printf("%s\n  Device ID: %u; alive: %u; running: %u\n  Rate: %.0f Hz; buffer: %u frames\n  Channels: %u input, %u output\n",
                     text.c_str(), device, alive, running, rate, frames,
                     channels(device, kAudioObjectPropertyScopeInput), channels(device, kAudioObjectPropertyScopeOutput));

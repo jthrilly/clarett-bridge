@@ -25,7 +25,7 @@ int main() {
         assert((rx & ~3ull) == base + A::RxSamples + i * A::RxSlot);
         assert((tx & 1) == (i == A::Descriptors - 1));
         assert((rx & 1) == (i == A::Descriptors - 1));
-        assert(bool(rx & 2) == ((i + 1) % 16 == 0));
+        assert(bool(rx & 2) == ((i + 1) % (A::Period / A::FragmentFrames) == 0));
         assert((tx & 4095) + A::FragmentFrames * A::TxChannels * 4 - (tx & 3) <= 4096);
         assert((rx & 4095) + A::FragmentFrames * A::RxChannels * 4 - (rx & 3) <= 4096);
     }
@@ -44,6 +44,7 @@ int main() {
     assert(A::timestampFrame(A::Frames + A::Period) == A::Frames);
     assert(A::timestampFrame(2 * A::Frames) == 2 * A::Frames);
     uint32_t frames = 0;
+    assert(A::counterDelta(0x80000004, 0, frames) && frames == 64);
     assert(A::counterDelta(0x80000010, 0, frames) && frames == 256);
     assert(A::counterDelta(0xc0000010, 0xf0, frames) && frames == 512); // overrun + wrap remains valid
     assert(!A::counterDelta(0xffffffff, 0, frames));

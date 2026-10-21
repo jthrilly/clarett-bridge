@@ -2,6 +2,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include "Monitor.hpp"
 
 namespace Clarett {
 constexpr uint32_t Execute = 0x80000000;
@@ -24,7 +25,7 @@ struct Request {
     uint16_t sequence;
     uint16_t length;
     uint16_t expectedLength;
-    uint8_t payload[8];
+    uint8_t payload[512];
 };
 
 inline Request streamInfo(uint16_t sequence) {
@@ -40,7 +41,40 @@ inline Request audioClock(uint16_t sequence) {
 inline Request audioSync(uint32_t opcode, uint16_t sequence) {
     return { opcode, sequence, 0, uint16_t(opcode == 0x006002 ? 0 : 4), {} };
 }
-inline bool permitted(const Request &r, bool audio = false) {
+inline Request monitorMuxRead(uint16_t seq, uint8_t offset, uint8_t count) {
+    return { 0x003001, seq, 4, uint16_t(count * 4), {offset, 0, count, 0} };
+}
+inline Request monitorMixRead(uint16_t seq, uint16_t bus) {
+    return { 0x002001, seq, 4, 60, {uint8_t(bus), uint8_t(bus >> 8), 30, 0} };
+}
+inline void put16(uint8_t *p, uint16_t v) { p[0] = uint8_t(v); p[1] = uint8_t(v >> 8); }
+inline void put32(uint8_t *p, uint32_t v) { for (unsigned i = 0; i < 4; ++i) p[i] = uint8_t(v >> (8*i)); }
+inline Request monitorMixWrite(uint16_t seq, unsigned bus, const uint16_t *row) {
+    Request r = {0x002002, seq, 62, 0, {}};
+    put16(r.payload, uint16_t(bus));
+    for (unsigned i = 0; i < 30; ++i) put16(r.payload + 2 + i * 2, row[i]);
+    return r;
+}
+inline Request monitorMuxWrite(uint16_t seq, const uint32_t *routes) {
+    Request r = {0x003002, seq, 260, 0, {}}; // band 0 + 48 destinations + 16 padding words
+    for (unsigned i = 0; i < Monitor::Routes; ++i) put32(r.payload + 4 + i * 4, routes[i]);
+    return r;
+}
+inline bool permitted(const Request &r, bool audio = false, bool controls = false) {
+    if (controls) {
+        if (r.opcode == 0x003001 && r.length == 4 && r.payload[1] == 0 && r.payload[3] == 0 &&
+            r.payload[2] >= 1 && r.payload[2] <= 28 && unsigned(r.payload[0]) + r.payload[2] <= Monitor::Routes &&
+            r.expectedLength == r.payload[2] * 4) return true;
+        if (r.opcode == 0x002001 && r.length == 4 && load16(r.payload) < Monitor::Buses &&
+            load16(r.payload + 2) == Monitor::Inputs && r.expectedLength == 60) return true;
+        if (r.opcode == 0x002002 && r.length == 62 && load16(r.payload) < Monitor::Buses && r.expectedLength == 0) return true;
+        if (r.opcode == 0x003002 && r.length == 260 && r.expectedLength == 0 && load32(r.payload) == 0) {
+            uint32_t routes[Monitor::Routes] = {};
+            for (unsigned i = 0; i < Monitor::Routes; ++i) routes[i] = load32(r.payload + 4 + i * 4);
+            for (unsigned i = 4 + Monitor::Routes * 4; i < r.length; ++i) if (r.payload[i]) return false;
+            return Monitor::routesValid(routes);
+        }
+    }
     if (audio) {
         const auto clock = audioClock(r.sequence);
         bool same = r.opcode == clock.opcode && r.length == clock.length && r.expectedLength == 0;
@@ -89,8 +123,8 @@ enum class Result { Success, NotPermitted, Disconnected, Timeout, BadResponse, P
 
 class Session {
 public:
-    Session(Transport &transport, volatile uint8_t *response, size_t capacity, bool audio = false)
-        : io(transport), buffer(response), size(capacity), allowAudio(audio) {}
+    Session(Transport &transport, volatile uint8_t *response, size_t capacity, bool audio = false, bool controls = false)
+        : io(transport), buffer(response), size(capacity), allowAudio(audio), allowControls(controls) {}
 
     Response lastResponse() const { return responseState; }
     uint32_t observedPhase() const { return phaseBits; }
@@ -98,7 +132,7 @@ public:
 
     Result transact(const Request &r) {
         if (poisoned) return Result::Poisoned;
-        if (!permitted(r, allowAudio) || size < HeaderSize + r.expectedLength) return Result::NotPermitted;
+        if (!permitted(r, allowAudio, allowControls) || size < HeaderSize + r.expectedLength) return Result::NotPermitted;
         responseState = Response::Pending;
         phaseBits = causeBits = 0;
         // Volatile stores are intentional: memory is shared with PCI DMA.
@@ -147,6 +181,7 @@ private:
     size_t size;
     bool poisoned = false;
     bool allowAudio = false;
+    bool allowControls = false;
     Response responseState = Response::Pending;
     uint32_t phaseBits = 0, causeBits = 0;
 };

@@ -7,9 +7,11 @@
 #include <DriverKit/OSString.h>
 #include <DriverKit/OSNumber.h>
 #include <DriverKit/OSBoolean.h>
+#include <DriverKit/OSData.h>
 #include <PCIDriverKit/PCIDriverKit.h>
 #include <os/log.h>
 #include "ClarettAudio.h"
+#include "ClarettSettings.h"
 #include "Protocol.hpp"
 #include "AudioRing.hpp"
 #include <AudioDriverKit/AudioDriverKit.h>
@@ -40,13 +42,22 @@ struct ClarettAudio_IVars {
     bool audioMapped;
     IOTimerDispatchSource *timer;
     OSAction *timerAction;
-    uint64_t timerInterval, lastEvent, frames, events, overruns, readCallbacks, writeCallbacks;
+    uint64_t timerInterval, ticksPerSecond, lastEvent, frames, events, overruns, readCallbacks, writeCallbacks;
     uint64_t inputNonzero, outputNonzero, callbacks, lastTimestamp;
     uint64_t lastOperation, lastCallbackFrames;
+    uint64_t confirmedFrames, inputAheadCallbacks, inputAheadFrames, outputLateCallbacks;
+    uint64_t pollGapMax, readTicksMax, eventGapMax, latePolls;
+    uint64_t lastPoll;
     uint8_t counter;
     uint16_t sequence;
     uint32_t running;
     bool failed;
+    IODispatchQueue *controlQueue, *periodQueue;
+    ClarettSettings *settings;
+    uint32_t mailboxBusy, closing, controlPending;
+    bool monitorEnabled, monitorDirty;
+    Clarett::Monitor::Plan monitor;
+
 
 };
 
@@ -56,6 +67,12 @@ constexpr uint32_t BufferSize = 16384;
 void number(OSDictionary *dict, const char *key, uint64_t value) {
     auto n = OSNumber::withNumber(value, 64);
     if (n) { dict->setObject(key, n); n->release(); }
+}
+
+void atomicMax(uint64_t *target, uint64_t value) {
+    auto previous = __atomic_load_n(target, __ATOMIC_RELAXED);
+    while (value > previous && !__atomic_compare_exchange_n(target, &previous, value, true,
+                                                           __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
 }
 
 bool commandBits(IOPCIDevice *pci, uint16_t set, uint16_t clear) {
@@ -95,6 +112,8 @@ void ClarettAudio::free() {
     if (ivars) {
         ReleaseAudioObjects();
         Quiesce();
+        OSSafeReleaseNULL(ivars->controlQueue);
+        OSSafeReleaseNULL(ivars->periodQueue);
         IODelete(ivars, ClarettAudio_IVars, 1);
     }
     super::free();
@@ -309,7 +328,12 @@ void ClarettAudio::Quiesce() {
 }
 
 kern_return_t IMPL(ClarettAudio, Stop) {
+    __atomic_store_n(&ivars->closing, 1, __ATOMIC_RELEASE);
     StopAudio();
+    if (ivars->periodQueue) ivars->periodQueue->DispatchSync(^{});
+    if (ivars->controlQueue) ivars->controlQueue->DispatchSync(^{
+        if (ivars->monitorEnabled && !ivars->failed) DisableMonitor();
+    });
     if (ivars->device) ivars->device->SetDeviceIsAlive(false);
     auto ret = Stop(provider, SUPERDISPATCH);
     // The framework stops its I/O threads before shared buffers are released.
@@ -322,6 +346,9 @@ void ClarettAudio::ReleaseAudioObjects() {
     if (ivars->device) ivars->device->SetIOOperationHandler(nullptr);
     if (ivars->timer) ivars->timer->Cancel(nullptr);
     OSSafeReleaseNULL(ivars->timer);
+    OSSafeReleaseNULL(ivars->settings);
+    // Queues remain alive until free: an in-flight property setter may enqueue
+    // a closing-only completion after Stop has drained earlier requests.
     OSSafeReleaseNULL(ivars->timerAction);
     OSSafeReleaseNULL(ivars->input);
     OSSafeReleaseNULL(ivars->output);
@@ -387,8 +414,8 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     device->SetSampleRate(rate);
     device->SetClockAlgorithm(IOUserAudioClockAlgorithm::SimpleIIR);
     device->SetClockDomain(0);
-    device->SetInputSafetyOffset(512);
-    device->SetOutputSafetyOffset(512);
+    device->SetInputSafetyOffset(A::Safety);
+    device->SetOutputSafetyOffset(A::Safety);
     device->SetInputLatency(32);
     device->SetOutputLatency(32);
     device->SetCanBeDefaultInputDevice(true);
@@ -424,8 +451,11 @@ kern_return_t ClarettAudio::ConfigureAudio() {
         if (frames > A::Frames) return kIOReturnBadArgument;
         if (!__atomic_load_n(&ivars->running, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
         uint64_t nonzero = 0;
+        const auto completed = __atomic_load_n(&ivars->confirmedFrames, __ATOMIC_ACQUIRE);
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
         if (operation == IOUserAudioIOOperationWriteEnd) {
+            if (int64_t(sample - completed) < 0)
+                __atomic_fetch_add(&ivars->outputLateCallbacks, 1, __ATOMIC_RELAXED);
             for (uint32_t f = 0; f < frames; ++f) {
                 const auto pos = (sample + f) % A::Frames;
                 for (uint32_t ch = 0; ch < A::TxChannels; ++ch) {
@@ -438,6 +468,11 @@ kern_return_t ClarettAudio::ConfigureAudio() {
             __atomic_fetch_add(&ivars->writeCallbacks, 1, __ATOMIC_RELAXED);
             __atomic_fetch_add(&ivars->outputNonzero, nonzero, __ATOMIC_RELAXED);
         } else if (operation == IOUserAudioIOOperationBeginRead) {
+            const auto ahead = int64_t(sample + frames - completed);
+            if (ahead > 0) {
+                __atomic_fetch_add(&ivars->inputAheadCallbacks, 1, __ATOMIC_RELAXED);
+                atomicMax(&ivars->inputAheadFrames, uint64_t(ahead));
+            }
             for (uint32_t f = 0; f < frames; ++f) {
                 const auto pos = (sample + f) % A::Frames;
                 for (uint32_t ch = 0; ch < A::RxChannels; ++ch) {
@@ -454,8 +489,11 @@ kern_return_t ClarettAudio::ConfigureAudio() {
         return kIOReturnSuccess;
     });
     if (ret != kIOReturnSuccess) return ret;
-    auto queue = GetWorkQueue();
-    ret = IOTimerDispatchSource::Create(queue.get(), &ivars->timer);
+    ret = IODispatchQueue::Create("ClarettControls", 0, 0, &ivars->controlQueue);
+    if (ret != kIOReturnSuccess) return ret;
+    ret = IODispatchQueue::Create("ClarettPeriods", 0, 0, &ivars->periodQueue);
+    if (ret != kIOReturnSuccess) return ret;
+    ret = IOTimerDispatchSource::Create(ivars->periodQueue, &ivars->timer);
     if (ret != kIOReturnSuccess) return ret;
     ret = CreateActionTick(0, &ivars->timerAction);
     if (ret != kIOReturnSuccess) return ret;
@@ -463,13 +501,21 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     if (ret != kIOReturnSuccess) return ret;
     struct mach_timebase_info timebase = {};
     mach_timebase_info(&timebase);
-    ivars->timerInterval = 500000ull * timebase.denom / timebase.numer;
+    ivars->ticksPerSecond = 1000000000ull * timebase.denom / timebase.numer;
+    ivars->timerInterval = ivars->ticksPerSecond / 4000; // 250 microseconds
+    ivars->settings = OSTypeAlloc(ClarettSettings);
+    if (!ivars->settings || !ivars->settings->Configure(this)) return kIOReturnNoMemory;
+    ret = device->AddCustomProperty(ivars->settings);
+    if (ret != kIOReturnSuccess) return ret;
+    MonitorStatus("off");
     ret = AddObject(device.get());
     if (ret != kIOReturnSuccess) return ret;
     auto props = OSDictionary::withCapacity(4);
     if (!props) return kIOReturnNoMemory;
     number(props, "ClarettAudioSampleRate", A::Rate);
     number(props, "ClarettAudioRingFrames", A::Frames);
+    number(props, "ClarettAudioPeriodFrames", A::Period);
+    number(props, "ClarettAudioSafetyFrames", A::Safety);
     number(props, "ClarettAudioPlaybackChannels", A::TxChannels);
     number(props, "ClarettAudioCaptureChannels", A::RxChannels);
     SetProperties(props); props->release();
@@ -477,34 +523,19 @@ kern_return_t ClarettAudio::ConfigureAudio() {
 }
 
 kern_return_t ClarettAudio::Command(uint32_t opcode) {
-    if (ivars->failed) return kIOReturnNotReady;
-    PCITransport io(ivars->pci, ivars->bar);
-    Clarett::Session session(io, ivars->bytes, BufferSize, true);
-    const auto request = opcode == 0x006003 ? Clarett::audioClock(ivars->sequence) : Clarett::audioSync(opcode, ivars->sequence);
-    const auto result = session.transact(request);
-    if (result != Clarett::Result::Success) {
-        ivars->failed = true;
-        auto props = OSDictionary::withCapacity(5);
-        if (props) {
-        number(props, "ClarettFailedOpcode", opcode);
-        number(props, "ClarettResponseLength", Clarett::load16(ivars->bytes + 4));
-        number(props, "ClarettResponseDeviceStatus", Clarett::load32(ivars->bytes + 8));
-        number(props, "ClarettResponseSequence", Clarett::load16(ivars->bytes + 6));
-        number(props, "ClarettRequestSequence", request.sequence);
-        SetProperties(props); props->release();
-        }
-        Publish("audio-clock-command-failed", uint64_t(result));
-        return kIOReturnIOError;
-    }
-    ++ivars->sequence;
-    if ((opcode == 0x006005 && Clarett::load32(ivars->bytes + 16) != A::Rate) ||
-        (opcode == 0x006004 && Clarett::load32(ivars->bytes + 16) == 0)) return kIOReturnNotReady;
+    const auto request = opcode == 0x006003 ? Clarett::audioClock(0) : Clarett::audioSync(opcode, 0);
+    uint8_t response[4] = {};
+    const auto ret = Exchange(opcode, request.payload, request.length, request.expectedLength,
+                              response, request.expectedLength >= 4 ? 4 : 0);
+    if (ret != kIOReturnSuccess) return ret;
+    if ((opcode == 0x006005 && Clarett::load32(response) != A::Rate) ||
+        (opcode == 0x006004 && (Clarett::load32(response) & 1) == 0)) return kIOReturnNotReady;
     return kIOReturnSuccess;
 }
 
 kern_return_t ClarettAudio::StartAudio() {
     if (__atomic_load_n(&ivars->running, __ATOMIC_ACQUIRE)) return kIOReturnSuccess;
-    if (ivars->failed || !ivars->opened) return kIOReturnNotReady;
+    if (ivars->failed || !ivars->opened || __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
     const uint32_t opcodes[] = {0x006003u, 0x006004u, 0x006002u, 0x006005u};
     for (auto opcode : opcodes) {
         const auto ret = Command(opcode);
@@ -514,8 +545,14 @@ kern_return_t ClarettAudio::StartAudio() {
     memset(ivars->inputBytes, 0, A::Frames * A::RxChannels * 4);
     memset(ivars->outputBytes, 0, A::Frames * A::TxChannels * 4);
     ivars->frames = ivars->events = ivars->overruns = ivars->lastTimestamp = 0;
+    __atomic_store_n(&ivars->confirmedFrames, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&ivars->inputAheadCallbacks, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&ivars->inputAheadFrames, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&ivars->outputLateCallbacks, 0, __ATOMIC_RELAXED);
+    ivars->pollGapMax = ivars->readTicksMax = ivars->eventGapMax = ivars->latePolls = 0;
     ivars->counter = 0;
     ivars->lastEvent = mach_absolute_time();
+    ivars->lastPoll = ivars->lastEvent;
     ivars->device->UpdateCurrentZeroTimestamp(0, ivars->lastEvent);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     PCITransport io(ivars->pci, ivars->bar);
@@ -556,7 +593,8 @@ void ClarettAudio::StopAudio() {
 kern_return_t ClarettAudio::StartDevice(IOUserAudioObjectID object, IOUserAudioStartStopFlags flags) {
     if (!ivars->device || object != ivars->device->GetObjectID()) return kIOReturnBadArgument;
     __block kern_return_t ret = kIOReturnNotReady;
-    GetWorkQueue()->DispatchSync(^{
+    ivars->controlQueue->DispatchSync(^{
+        ivars->periodQueue->DispatchSync(^{});
         ret = StartAudio();
         if (ret == kIOReturnSuccess) {
             ret = super::StartDevice(object, flags);
@@ -569,8 +607,9 @@ kern_return_t ClarettAudio::StartDevice(IOUserAudioObjectID object, IOUserAudioS
 kern_return_t ClarettAudio::StopDevice(IOUserAudioObjectID object, IOUserAudioStartStopFlags flags) {
     if (!ivars->device || object != ivars->device->GetObjectID()) return kIOReturnBadArgument;
     __block kern_return_t ret;
-    GetWorkQueue()->DispatchSync(^{
+    ivars->controlQueue->DispatchSync(^{
         StopAudio();
+        ivars->periodQueue->DispatchSync(^{});
         ret = super::StopDevice(object, flags);
         Publish("audio-device-ready");
     });
@@ -580,21 +619,35 @@ kern_return_t ClarettAudio::StopDevice(IOUserAudioObjectID object, IOUserAudioSt
 void IMPL(ClarettAudio, Tick) {
     if (!__atomic_load_n(&ivars->running, __ATOMIC_ACQUIRE)) return;
     const auto now = mach_absolute_time();
+    const auto gap = now - ivars->lastPoll;
+    if (gap > ivars->pollGapMax) ivars->pollGapMax = gap;
+    ivars->latePolls += gap > ivars->ticksPerSecond * A::Period / A::Rate;
+    ivars->lastPoll = now;
     PCITransport io(ivars->pci, ivars->bar);
     uint32_t unused = 0, cause = 0;
-    if (!io.read(0x100, unused) || !io.read(0x300, cause) || !io.read(0x200, unused) ||
-        !io.read(0x400, unused) || !io.read(0x500, unused)) {
+    const bool mailbox = __atomic_load_n(&ivars->mailboxBusy, __ATOMIC_ACQUIRE) != 0;
+    const bool connected = (mailbox || io.read(0x100, unused)) && io.read(0x300, cause) && io.read(0x200, unused) &&
+        (mailbox || (io.read(0x400, unused) && io.read(0x500, unused)));
+    const auto readTicks = mach_absolute_time() - now;
+    if (readTicks > ivars->readTicksMax) ivars->readTicksMax = readTicks;
+    if (!connected) {
         StopAudio();
-        ivars->device->SetDeviceIsAlive(false);
+        ivars->controlQueue->DispatchAsync(^{
+            if (!__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) ivars->device->SetDeviceIsAlive(false);
+        });
         Publish("audio-device-disconnected"); return;
     }
-    if (now - ivars->lastEvent > ivars->timerInterval * 150) {
+    if (now - ivars->lastEvent > ivars->ticksPerSecond * 75 / 1000) {
         StopAudio();
-        ivars->device->SetDeviceIsAlive(false);
+        ivars->controlQueue->DispatchAsync(^{
+            if (!__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) ivars->device->SetDeviceIsAlive(false);
+        });
         Publish("audio-clock-stalled"); return;
     }
     uint32_t delta = 0;
     if (A::counterDelta(cause, ivars->counter, delta)) {
+        const auto eventGap = now - ivars->lastEvent;
+        if (eventGap > ivars->eventGapMax) ivars->eventGapMax = eventGap;
         ivars->counter = uint8_t(cause);
         // Retire consumed playback samples so an input-only client cannot
         // cause the last output block to repeat on each ring wrap.
@@ -603,20 +656,21 @@ void IMPL(ClarettAudio, Tick) {
                 *reinterpret_cast<volatile uint32_t *>(ivars->audioBytes + A::sampleOffset(false, ivars->frames + f, ch)) = 0;
         __atomic_thread_fence(__ATOMIC_SEQ_CST);
         ivars->frames += delta;
+        __atomic_store_n(&ivars->confirmedFrames, ivars->frames, __ATOMIC_RELEASE);
         ++ivars->events;
         ivars->overruns += (cause & 0x40000000) != 0;
         ivars->lastEvent = now;
         const auto timestampFrame = A::timestampFrame(ivars->frames);
         if (timestampFrame > ivars->lastTimestamp) {
             // The HAL treats the zero-timestamp period as its ring-buffer size.
-            // Publish one timestamp per complete shared ring, not per 256-frame
+            // Publish one timestamp per complete shared ring, not per hardware
             // hardware IRQ. Interpolate a late poll back to the ring boundary.
             const auto framesPastBoundary = ivars->frames - timestampFrame;
-            const auto ticksPastBoundary = framesPastBoundary * ivars->timerInterval * 2000 / A::Rate;
+            const auto ticksPastBoundary = framesPastBoundary * ivars->ticksPerSecond / A::Rate;
             ivars->device->UpdateCurrentZeroTimestamp(timestampFrame, now - ticksPastBoundary);
             ivars->lastTimestamp = timestampFrame;
         }
-        if (ivars->events % 188 == 0) {
+        if (ivars->events % (A::Rate / A::Period) == 0) {
             auto props = OSDictionary::withCapacity(7);
             if (props) {
             number(props, "ClarettAudioCallbacks", __atomic_load_n(&ivars->callbacks, __ATOMIC_RELAXED));
@@ -629,9 +683,211 @@ void IMPL(ClarettAudio, Tick) {
             number(props, "ClarettAudioWriteCallbacks", __atomic_load_n(&ivars->writeCallbacks, __ATOMIC_RELAXED));
             number(props, "ClarettAudioInputNonzero", __atomic_load_n(&ivars->inputNonzero, __ATOMIC_RELAXED));
             number(props, "ClarettAudioOutputNonzero", __atomic_load_n(&ivars->outputNonzero, __ATOMIC_RELAXED));
+            number(props, "ClarettAudioInputAheadCallbacks", __atomic_load_n(&ivars->inputAheadCallbacks, __ATOMIC_RELAXED));
+            number(props, "ClarettAudioInputAheadFramesMax", __atomic_load_n(&ivars->inputAheadFrames, __ATOMIC_RELAXED));
+            number(props, "ClarettAudioOutputLateCallbacks", __atomic_load_n(&ivars->outputLateCallbacks, __ATOMIC_RELAXED));
+            number(props, "ClarettAudioPollGapMaxUs", ivars->pollGapMax * 1000000 / ivars->ticksPerSecond);
+            number(props, "ClarettAudioReadMaxUs", ivars->readTicksMax * 1000000 / ivars->ticksPerSecond);
+            number(props, "ClarettAudioEventGapMaxUs", ivars->eventGapMax * 1000000 / ivars->ticksPerSecond);
+            number(props, "ClarettAudioLatePolls", ivars->latePolls);
             SetProperties(props); props->release();
             }
         }
     }
-    ivars->timer->WakeAtTime(kIOTimerClockMachAbsoluteTime, mach_absolute_time() + ivars->timerInterval, 0);
+    if (__atomic_load_n(&ivars->running, __ATOMIC_ACQUIRE))
+        ivars->timer->WakeAtTime(kIOTimerClockMachAbsoluteTime, mach_absolute_time() + ivars->timerInterval, 0);
+}
+
+kern_return_t ClarettAudio::Exchange(uint32_t opcode, const uint8_t *payload, uint16_t length,
+                                     uint16_t minimum, uint8_t *response, uint16_t responseSize) {
+    if (ivars->failed || !ivars->opened) return kIOReturnNotReady;
+    Clarett::Request request = {opcode, ivars->sequence, length, minimum, {}};
+    if (length > sizeof(request.payload) || responseSize > minimum || (length && !payload)) return kIOReturnBadArgument;
+    if (length) memcpy(request.payload, payload, length);
+    if (!Clarett::permitted(request, true, true)) return kIOReturnNotPermitted;
+    // Transfer cause-register ownership before submitting. Drain any period
+    // callback which observed the old flag; subsequent callbacks touch only
+    // 0x300/0x200, while mailbox polling owns 0x100/0x400/0x500.
+    __atomic_store_n(&ivars->mailboxBusy, 1, __ATOMIC_RELEASE);
+    ivars->periodQueue->DispatchSync(^{});
+    PCITransport io(ivars->pci, ivars->bar);
+    Clarett::Session session(io, ivars->bytes, BufferSize, true, true);
+    const auto result = session.transact(request);
+    if (result == Clarett::Result::Success) {
+        ++ivars->sequence;
+        if (response && responseSize)
+            for (unsigned i = 0; i < responseSize; ++i) response[i] = ivars->bytes[16 + i];
+    } else {
+        ivars->failed = true;
+        auto props = OSDictionary::withCapacity(7);
+        if (props) {
+            number(props, "ClarettFailedOpcode", opcode);
+            number(props, "ClarettResponseLength", Clarett::load16(ivars->bytes + 4));
+            number(props, "ClarettResponseDeviceStatus", Clarett::load32(ivars->bytes + 8));
+            number(props, "ClarettResponseSequence", Clarett::load16(ivars->bytes + 6));
+            number(props, "ClarettRequestSequence", request.sequence);
+            number(props, "ClarettResponseEcho", Clarett::load32(ivars->bytes));
+            number(props, "ClarettResponseValidation", uint64_t(session.lastResponse()));
+            SetProperties(props); props->release();
+        }
+    }
+    __atomic_store_n(&ivars->mailboxBusy, 0, __ATOMIC_RELEASE);
+    return result == Clarett::Result::Success ? kIOReturnSuccess : kIOReturnIOError;
+}
+
+kern_return_t ClarettAudio::ReadRoutes(uint32_t *entries) {
+    for (unsigned offset = 0; offset < Clarett::Monitor::Routes; offset += 28) {
+        const auto count = uint8_t(Clarett::Monitor::Routes - offset < 28 ? Clarett::Monitor::Routes - offset : 28);
+        const auto request = Clarett::monitorMuxRead(0, uint8_t(offset), count);
+        uint8_t reply[112] = {};
+        auto ret = Exchange(request.opcode, request.payload, request.length, request.expectedLength, reply, request.expectedLength);
+        if (ret != kIOReturnSuccess) return ret;
+        for (unsigned i = 0; i < count; ++i) entries[offset + i] = Clarett::load32(reply + i * 4);
+    }
+    if (!Clarett::Monitor::routesValid(entries)) {
+        auto props = OSDictionary::withCapacity(1);
+        auto data = OSData::withBytes(entries, Clarett::Monitor::Routes * sizeof(uint32_t));
+        if (props && data) { props->setObject("ClarettMonitorUnexpectedRoutes", data); SetProperties(props); }
+        OSSafeReleaseNULL(data); OSSafeReleaseNULL(props);
+        return kIOReturnUnsupported;
+    }
+    return kIOReturnSuccess;
+}
+kern_return_t ClarettAudio::ReadRow(uint32_t bus, uint16_t *row) {
+    auto request = Clarett::monitorMixRead(0, uint16_t(bus));
+    uint8_t reply[60] = {};
+    const auto ret = Exchange(request.opcode, request.payload, request.length, request.expectedLength, reply, 60);
+    if (ret == kIOReturnSuccess)
+        for (unsigned i = 0; i < Clarett::Monitor::Inputs; ++i) row[i] = Clarett::load16(reply + i * 2);
+    return ret;
+}
+kern_return_t ClarettAudio::WriteRoutes(const uint32_t *entries) {
+    const auto request = Clarett::monitorMuxWrite(0, entries);
+    return Exchange(request.opcode, request.payload, request.length, 0, nullptr, 0);
+}
+kern_return_t ClarettAudio::WriteRow(uint32_t bus, const uint16_t *row) {
+    const auto request = Clarett::monitorMixWrite(0, bus, row);
+    return Exchange(request.opcode, request.payload, request.length, 0, nullptr, 0);
+}
+
+kern_return_t ClarettAudio::VerifyMonitor() {
+    uint32_t routes[Clarett::Monitor::Routes] = {};
+    auto ret = ReadRoutes(routes);
+    if (ret != kIOReturnSuccess) return ret;
+    if (!Clarett::Monitor::sameRoutes(routes, ivars->monitor.active)) return kIOReturnExclusiveAccess;
+    for (unsigned b = 0; b < 2; ++b) {
+        uint16_t row[Clarett::Monitor::Inputs] = {};
+        ret = ReadRow(ivars->monitor.buses[b], row);
+        if (ret != kIOReturnSuccess) return ret;
+        if (memcmp(row, ivars->monitor.rows[b], sizeof(row))) return kIOReturnExclusiveAccess;
+    }
+    return kIOReturnSuccess;
+}
+
+kern_return_t ClarettAudio::DisableMonitor() {
+    if (!ivars->monitorEnabled && !ivars->monitorDirty) return kIOReturnSuccess;
+    if (!ivars->monitorDirty) {
+        const auto ret = VerifyMonitor();
+        if (ret != kIOReturnSuccess) return ret; // do not overwrite outside routing changes
+    }
+    ivars->monitorDirty = true;
+    auto ret = WriteRoutes(ivars->monitor.before.routes);
+    if (ret != kIOReturnSuccess) return ret;
+    for (unsigned b = 0; b < 2; ++b) {
+        ret = WriteRow(ivars->monitor.buses[b], ivars->monitor.before.rows[ivars->monitor.buses[b]]);
+        if (ret != kIOReturnSuccess) return ret;
+    }
+    uint32_t routes[Clarett::Monitor::Routes] = {};
+    ret = ReadRoutes(routes);
+    if (ret != kIOReturnSuccess) return ret;
+    if (!Clarett::Monitor::sameRoutes(routes, ivars->monitor.before.routes)) return kIOReturnIOError;
+    for (unsigned b = 0; b < 2; ++b) {
+        uint16_t row[Clarett::Monitor::Inputs] = {};
+        ret = ReadRow(ivars->monitor.buses[b], row);
+        if (ret != kIOReturnSuccess) return ret;
+        if (memcmp(row, ivars->monitor.before.rows[ivars->monitor.buses[b]], sizeof(row))) return kIOReturnIOError;
+    }
+    ivars->monitorEnabled = false;
+    ivars->monitorDirty = false;
+    return kIOReturnSuccess;
+}
+
+kern_return_t ClarettAudio::ApplyMonitor(bool enabled, uint32_t inputMode, uint32_t outputPair, uint32_t blend) {
+    Clarett::Monitor::Options options{enabled, inputMode, outputPair, blend};
+    if (!Clarett::Monitor::valid(options)) return kIOReturnBadArgument;
+    auto ret = DisableMonitor();
+    if (ret != kIOReturnSuccess || !enabled) return ret;
+    if (ivars->failed || __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
+    Clarett::Monitor::Snapshot original = {};
+    ret = ReadRoutes(original.routes);
+    if (ret != kIOReturnSuccess) return ret;
+    for (unsigned bus = 0; bus < Clarett::Monitor::Buses; ++bus) {
+        ret = ReadRow(bus, original.rows[bus]);
+        if (ret != kIOReturnSuccess) return ret;
+    }
+    if (!Clarett::Monitor::build(original, options, ivars->monitor)) return kIOReturnNoResources;
+    // These buses have no router references. Mute them first, configure their
+    // input slots without changing live original mixes, then switch only the
+    // requested analogue outputs after the complete new rows are ready.
+    ivars->monitorDirty = true;
+    uint16_t silent[Clarett::Monitor::Inputs] = {};
+    for (unsigned b = 0; b < 2 && ret == kIOReturnSuccess; ++b) ret = WriteRow(ivars->monitor.buses[b], silent);
+    if (ret == kIOReturnSuccess) ret = WriteRoutes(ivars->monitor.setup);
+    for (unsigned b = 0; b < 2 && ret == kIOReturnSuccess; ++b) ret = WriteRow(ivars->monitor.buses[b], ivars->monitor.rows[b]);
+    if (ret == kIOReturnSuccess) ret = WriteRoutes(ivars->monitor.active);
+    if (ret == kIOReturnSuccess) ret = VerifyMonitor();
+    if (ret == kIOReturnSuccess) {
+        ivars->monitorEnabled = true;
+        ivars->monitorDirty = false;
+    } else if (!ivars->failed) {
+        // A known, completed operation may be rolled back. An uncertain or
+        // timed-out mailbox session is terminal and is never reused here.
+        DisableMonitor();
+    }
+    return ret;
+}
+
+void ClarettAudio::MonitorStatus(const char *state, uint32_t error) {
+    auto props = OSDictionary::withCapacity(8);
+    auto label = OSString::withCString(state);
+    if (props && label) {
+        props->setObject("ClarettMonitorStatus", label);
+        number(props, "ClarettMonitorError", error);
+        number(props, "ClarettMonitorEnabled", ivars->monitorEnabled);
+        number(props, "ClarettMonitorUncertain", ivars->monitorDirty);
+        number(props, "ClarettControlPending", __atomic_load_n(&ivars->controlPending, __ATOMIC_ACQUIRE));
+        if (ivars->monitorEnabled) {
+            number(props, "ClarettMonitorInputMode", ivars->monitor.options.inputMode);
+            number(props, "ClarettMonitorOutputPair", ivars->monitor.options.outputPair);
+            number(props, "ClarettMonitorBlend", ivars->monitor.options.blend);
+        }
+        SetProperties(props);
+    }
+    OSSafeReleaseNULL(label); OSSafeReleaseNULL(props);
+}
+
+kern_return_t ClarettAudio::QueueMonitorConfiguration(OSDictionary *settings) {
+    if (__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) || !ivars->controlQueue) return kIOReturnNotReady;
+    if (settings->getCount() != 4) return kIOReturnBadArgument;
+    const auto enabled = OSDynamicCast(OSBoolean, settings->getObject("Enabled"));
+    const auto input = OSDynamicCast(OSNumber, settings->getObject("InputMode"));
+    const auto output = OSDynamicCast(OSNumber, settings->getObject("OutputPair"));
+    const auto blend = OSDynamicCast(OSNumber, settings->getObject("Blend"));
+    if (!enabled || !input || !output || !blend || input->unsigned64BitValue() > 3 ||
+        output->unsigned64BitValue() > 3 || blend->unsigned64BitValue() > 100) return kIOReturnBadArgument;
+    Clarett::Monitor::Options options{enabled == kOSBooleanTrue, input->unsigned32BitValue(), output->unsigned32BitValue(), blend->unsigned32BitValue()};
+    if (!Clarett::Monitor::valid(options)) return kIOReturnBadArgument;
+    uint32_t idle = 0;
+    if (!__atomic_compare_exchange_n(&ivars->controlPending, &idle, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return kIOReturnBusy;
+    retain(); // keep this object alive until even a late closing request retires
+    ivars->controlQueue->DispatchAsync(^{
+        MonitorStatus("applying");
+        auto ret = __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) ? kIOReturnNoDevice :
+            ApplyMonitor(options.enabled, options.inputMode, options.outputPair, options.blend);
+        __atomic_store_n(&ivars->controlPending, 0, __ATOMIC_RELEASE);
+        MonitorStatus(ret == kIOReturnSuccess ? (ivars->monitorEnabled ? "on-verified" : "off-restored") :
+                      (ivars->monitorDirty ? "state-uncertain" : "request-failed"), uint32_t(ret));
+        release();
+    });
+    return kIOReturnSuccess;
 }

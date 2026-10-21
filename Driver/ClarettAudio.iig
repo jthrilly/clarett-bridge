@@ -4,6 +4,7 @@
 #include <AudioDriverKit/IOUserAudioDriver.iig>
 #include <DriverKit/IOTimerDispatchSource.iig>
 using namespace AudioDriverKit;
+class OSDictionary;
 class ClarettAudio : public IOUserAudioDriver {
 public:
     virtual bool init() override;
@@ -12,7 +13,17 @@ public:
     virtual kern_return_t Stop(IOService *provider) override;
     virtual kern_return_t StartDevice(IOUserAudioObjectID object, IOUserAudioStartStopFlags flags) override;
     virtual kern_return_t StopDevice(IOUserAudioObjectID object, IOUserAudioStartStopFlags flags) override;
+    kern_return_t QueueMonitorConfiguration(OSDictionary *settings) LOCALONLY;
 private:
+    kern_return_t Exchange(uint32_t opcode, const uint8_t *payload, uint16_t length, uint16_t minimum, uint8_t *response, uint16_t responseSize) LOCALONLY;
+    kern_return_t ReadRoutes(uint32_t *entries) LOCALONLY;
+    kern_return_t ReadRow(uint32_t bus, uint16_t *row) LOCALONLY;
+    kern_return_t WriteRoutes(const uint32_t *entries) LOCALONLY;
+    kern_return_t WriteRow(uint32_t bus, const uint16_t *row) LOCALONLY;
+    kern_return_t ApplyMonitor(bool enabled, uint32_t inputMode, uint32_t outputPair, uint32_t blend) LOCALONLY;
+    kern_return_t DisableMonitor() LOCALONLY;
+    kern_return_t VerifyMonitor() LOCALONLY;
+    void MonitorStatus(const char *state, uint32_t error = 0) LOCALONLY;
     void Publish(const char *state, uint64_t code = 0) LOCALONLY;
     kern_return_t ProbeMailbox() LOCALONLY;
     kern_return_t ConfigureAudio() LOCALONLY;

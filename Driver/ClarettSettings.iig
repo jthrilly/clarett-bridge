@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#ifndef ClarettSettings_h
+#define ClarettSettings_h
+#include <AudioDriverKit/IOUserAudioCustomProperty.iig>
+using namespace AudioDriverKit;
+class ClarettAudio;
+class ClarettSettings : public IOUserAudioCustomProperty {
+public:
+    bool Configure(ClarettAudio *owner) LOCALONLY;
+    virtual void free() override LOCALONLY;
+    virtual kern_return_t HandleChangeCustomPropertyDataValueWithQualifier(OSObject *qualifier, OSObject *data) override LOCALONLY;
+};
+#endif
