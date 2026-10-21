@@ -1,5 +1,7 @@
 # AudioDriverKit streaming candidate
 
+*Historical milestone notes. For the current rate-aware driver and control app, see [architecture](architecture.md), [user guide](user-guide.md) and [validation](validation.md).*
+
 ## Scope and current result
 
 The audio stage exposes **Clarett 2Pre Thunderbolt (Experimental)** to Core Audio at **48,000 Hz**, with **4 playback channels and 14 capture channels**. The implementation is specific to the original Thunderbolt 2Pre's transport geometry. The host application does not play or record audio itself.

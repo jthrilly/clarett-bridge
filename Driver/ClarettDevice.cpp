@@ -16,6 +16,10 @@ void ClarettDevice::free() {
     if (ivars) IODelete(ivars, ClarettDevice_IVars, 1);
     super::free();
 }
+kern_return_t ClarettDevice::HandleChangeSampleRate(double rate) {
+    // The framework calls this during its host-approved configuration change.
+    return ivars->owner->PerformSampleRateChange(rate);
+}
 kern_return_t ClarettDevice::PerformDeviceConfigurationChange(uint64_t action, OSObject *info) {
     if ((action & 0xffffffff00000000ull) == Clarett::Audio::TimingAction)
         return info ? kIOReturnBadArgument : ivars->owner->PerformTimingChange(uint32_t(action));

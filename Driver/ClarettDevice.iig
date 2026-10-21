@@ -8,6 +8,7 @@ class ClarettDevice : public IOUserAudioDevice {
 public:
     bool Configure(ClarettAudio *owner, OSString *uid, OSString *model, OSString *manufacturer, uint32_t ringFrames) LOCALONLY;
     virtual void free() override LOCALONLY;
+    virtual kern_return_t HandleChangeSampleRate(double rate) override LOCALONLY;
     virtual kern_return_t PerformDeviceConfigurationChange(uint64_t action, OSObject *info) override LOCALONLY;
     virtual kern_return_t AbortDeviceConfigurationChange(uint64_t action, OSObject *info) override LOCALONLY;
 };

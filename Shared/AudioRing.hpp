@@ -2,8 +2,9 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include "SampleRate.hpp"
 namespace Clarett::Audio {
-constexpr uint32_t Rate = 48000, Descriptors = 256, FragmentFrames = 16;
+constexpr uint32_t Descriptors = 256, FragmentFrames = 16;
 constexpr uint32_t Frames = Descriptors * FragmentFrames;
 constexpr uint32_t TxChannels = 4, RxChannels = 14;
 constexpr size_t TableBytes = Descriptors * 8;

@@ -34,7 +34,7 @@ plist('Driver/Info.plist', {
     'CFBundleExecutable': '$(EXECUTABLE_NAME)',
     'CFBundleName': '$(PRODUCT_NAME)',
     'CFBundlePackageType': 'DEXT',
-    'CFBundleShortVersionString': '0.1',
+    'CFBundleShortVersionString': '0.2',
     'CFBundleVersion': '$(CURRENT_PROJECT_VERSION)',
     'OSBundleUsageDescription': 'Identify a connected Clarett 2Pre Thunderbolt interface.',
     'IOKitPersonalities': {'ClarettProbe': {
@@ -66,7 +66,7 @@ plist('Host/Info.plist', {
     'LSApplicationCategoryType': 'public.app-category.music',
     'ClarettDriverIdentifier': BUNDLE_PREFIX + '.driver',
     'CFBundlePackageType': 'APPL',
-    'CFBundleShortVersionString': '0.1.0',
+    'CFBundleShortVersionString': '0.2.0',
     'CFBundleVersion': '$(CURRENT_PROJECT_VERSION)',
     'LSMinimumSystemVersion': '$(MACOSX_DEPLOYMENT_TARGET)',
     'NSPrincipalClass': 'NSApplication',
@@ -88,6 +88,7 @@ if AUDIO:
 icon = file('Host/Resources/ClarettBridge.icns', 'image.icns')
 others = [file('Shared/Protocol.hpp', 'sourcecode.cpp.h'),
           file('Shared/AudioRing.hpp', 'sourcecode.cpp.h'),
+          file('Shared/SampleRate.hpp', 'sourcecode.cpp.h'),
           file('Shared/Monitor.hpp', 'sourcecode.cpp.h'),
           file('Driver/Info.plist', 'text.plist.xml'),
           file('Host/Info.plist', 'text.plist.xml'),
@@ -104,8 +105,8 @@ common = {
     'GCC_WARN_UNDECLARED_SELECTOR': 'YES', 'GCC_WARN_UNINITIALIZED_AUTOS': 'YES_AGGRESSIVE',
     'ENABLE_USER_SCRIPT_SANDBOXING': 'YES', 'CODE_SIGN_STYLE': 'Automatic',
     'DEVELOPMENT_TEAM': '', 'CODE_SIGN_IDENTITY': 'Apple Development',
-    'CLARETT_PROBE_MODE': MODE, 'CLARETT_DRIVER_VERSION': '12' if AUDIO else '4' if MODE == 'mailbox' else '1',
-    'CLARETT_HOST_VERSION': '13',
+    'CLARETT_PROBE_MODE': MODE, 'CLARETT_DRIVER_VERSION': '13' if AUDIO else '4' if MODE == 'mailbox' else '1',
+    'CLARETT_HOST_VERSION': '14',
 }
 def configs(name, extra):
     entries = []

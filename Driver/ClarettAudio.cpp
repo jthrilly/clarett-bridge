@@ -57,6 +57,7 @@ struct ClarettAudio_IVars {
     ClarettSettings *settings;
     ClarettSettings *timingSettings;
     uint32_t safetyFrames, periodFrames, timingPending, desiredSafety;
+    uint32_t sampleRate, liveCapture[2];
     uint32_t mailboxBusy, closing, controlPending;
     bool monitorEnabled, monitorDirty;
     Clarett::Monitor::Plan monitor;
@@ -294,8 +295,24 @@ kern_return_t ClarettAudio::ProbeMailbox() {
             props->release();
         }
     }
-    ivars->sequence = 6;
-    Publish("mailbox-six-transactions-ok");
+    // Double-speed changes the live capture tail, not the DMA frame stride.
+    const auto highBand = Clarett::streamInfo(6, 1);
+    if (session.transact(highBand) != Clarett::Result::Success) return kIOReturnIOError;
+    if (Clarett::load16(ivars->bytes + 16) != A::TxChannels ||
+        Clarett::load16(ivars->bytes + 18) != 10) {
+        Publish("unexpected-double-speed-geometry"); return kIOReturnUnsupported;
+    }
+    ivars->liveCapture[0] = A::RxChannels;
+    ivars->liveCapture[1] = 10;
+    ivars->sequence = 7;
+    auto geometry = OSDictionary::withCapacity(3);
+    if (geometry) {
+        number(geometry, "ClarettCompletedTransactions", 7);
+        number(geometry, "ClarettCaptureSingleSpeed", A::RxChannels);
+        number(geometry, "ClarettCaptureDoubleSpeed", 10);
+        SetProperties(geometry); geometry->release();
+    }
+    Publish("mailbox-rate-bands-verified");
     return kIOReturnSuccess;
 }
 
@@ -332,6 +349,10 @@ void ClarettAudio::Quiesce() {
 
 kern_return_t IMPL(ClarettAudio, Stop) {
     __atomic_store_n(&ivars->closing, 1, __ATOMIC_RELEASE);
+    // A framework rate callback cannot synchronously enter controlQueue (the
+    // device's setter queue may already be held). Let its bounded exchange
+    // retire before disabling PCI or releasing shared DMA memory.
+    while (__atomic_load_n(&ivars->timingPending, __ATOMIC_ACQUIRE) == 2) IOSleep(1);
     StopAudio();
     if (ivars->periodQueue) ivars->periodQueue->DispatchSync(^{});
     if (ivars->controlQueue) ivars->controlQueue->DispatchSync(^{
@@ -378,6 +399,7 @@ kern_return_t audioBuffer(uint64_t size, IOBufferMemoryDescriptor **descriptor, 
 
 kern_return_t ClarettAudio::ConfigureAudio() {
     Publish("configuring-audio-device");
+    ivars->sampleRate = A::DefaultRate;
     ivars->safetyFrames = A::Safety;
     ivars->periodFrames = A::Period;
     void *address = nullptr;
@@ -415,9 +437,12 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     device->SetName(name.get());
     SetName(name.get());
     device->SetTransportType(IOUserAudioTransportType::Thunderbolt);
-    double rate = A::Rate;
-    device->SetAvailableSampleRates(&rate, 1);
-    device->SetSampleRate(rate);
+    double rates[A::RateCount] = {};
+    for (size_t i = 0; i < A::RateCount; ++i) rates[i] = A::Rates[i];
+    ret = device->SetAvailableSampleRates(rates, A::RateCount);
+    if (ret != kIOReturnSuccess) return ret;
+    ret = device->SetSampleRate(A::DefaultRate);
+    if (ret != kIOReturnSuccess) return ret;
     device->SetClockAlgorithm(IOUserAudioClockAlgorithm::SimpleIIR);
     device->SetClockDomain(0);
     device->SetInputSafetyOffset(A::Safety);
@@ -436,11 +461,15 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     for (unsigned direction = 0; direction < 2; ++direction) {
         auto stream = direction == 0 ? input.get() : output.get();
         const auto channels = direction == 0 ? A::RxChannels : A::TxChannels;
-        IOUserAudioStreamBasicDescription format = { double(A::Rate), IOUserAudioFormatID::LinearPCM,
+        IOUserAudioStreamBasicDescription format = { double(A::DefaultRate), IOUserAudioFormatID::LinearPCM,
             static_cast<IOUserAudioFormatFlags>(IOUserAudioFormatFlags::FormatFlagIsSignedInteger |
                 IOUserAudioFormatFlags::FormatFlagIsPacked | IOUserAudioFormatFlags::FormatFlagsNativeEndian),
             channels * 4, 1, channels * 4, channels, 32 };
-        ret = stream->SetAvailableStreamFormats(&format, 1);
+        IOUserAudioStreamBasicDescription formats[A::RateCount] = {};
+        for (size_t i = 0; i < A::RateCount; ++i) {
+            formats[i] = format; formats[i].mSampleRate = A::Rates[i];
+        }
+        ret = stream->SetAvailableStreamFormats(formats, A::RateCount);
         if (ret != kIOReturnSuccess) return ret;
         ret = stream->SetCurrentStreamFormat(&format);
         if (ret != kIOReturnSuccess) return ret;
@@ -474,6 +503,8 @@ kern_return_t ClarettAudio::ConfigureAudio() {
             __atomic_fetch_add(&ivars->writeCallbacks, 1, __ATOMIC_RELAXED);
             __atomic_fetch_add(&ivars->outputNonzero, nonzero, __ATOMIC_RELAXED);
         } else if (operation == IOUserAudioIOOperationBeginRead) {
+            const auto rate = __atomic_load_n(&ivars->sampleRate, __ATOMIC_ACQUIRE);
+            const auto liveChannels = ivars->liveCapture[A::speedBand(rate)];
             const auto ahead = int64_t(sample + frames - completed);
             if (ahead > 0) {
                 __atomic_fetch_add(&ivars->inputAheadCallbacks, 1, __ATOMIC_RELAXED);
@@ -483,7 +514,7 @@ kern_return_t ClarettAudio::ConfigureAudio() {
                 const auto pos = (sample + f) % A::Frames;
                 for (uint32_t ch = 0; ch < A::RxChannels; ++ch) {
                     const auto p = reinterpret_cast<volatile uint32_t *>(ivars->audioBytes + A::sampleOffset(true, sample + f, ch));
-                    const auto value = int32_t(*p & 0xffffff00u);
+                    const auto value = A::captureSample(*p, ch, liveChannels);
                     ivars->inputBytes[pos * A::RxChannels + ch] = value;
                     nonzero += value != 0;
                 }
@@ -508,7 +539,7 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     struct mach_timebase_info timebase = {};
     mach_timebase_info(&timebase);
     ivars->ticksPerSecond = 1000000000ull * timebase.denom / timebase.numer;
-    ivars->timerInterval = ivars->ticksPerSecond / 2000; // v6 baseline: 500 microseconds
+    ivars->timerInterval = A::pollTicks(ivars->ticksPerSecond, ivars->sampleRate, ivars->safetyFrames);
     ivars->settings = OSTypeAlloc(ClarettSettings);
     if (!ivars->settings || !ivars->settings->Configure(this)) return kIOReturnNoMemory;
     ret = device->AddCustomProperty(ivars->settings);
@@ -519,11 +550,14 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     if (ret != kIOReturnSuccess) return ret;
     MonitorStatus("off");
     TimingStatus("stable");
+    ret = ChangeClock(ivars->sampleRate);
+    if (ret != kIOReturnSuccess) return ret;
+    RateStatus("stable", ivars->sampleRate);
     ret = AddObject(device.get());
     if (ret != kIOReturnSuccess) return ret;
     auto props = OSDictionary::withCapacity(4);
     if (!props) return kIOReturnNoMemory;
-    number(props, "ClarettAudioSampleRate", A::Rate);
+    number(props, "ClarettAudioSampleRate", ivars->sampleRate);
     number(props, "ClarettAudioRingFrames", A::Frames);
     number(props, "ClarettAudioPeriodFrames", A::Period);
     number(props, "ClarettAudioSafetyFrames", A::Safety);
@@ -533,25 +567,51 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     return kIOReturnSuccess;
 }
 
-kern_return_t ClarettAudio::Command(uint32_t opcode) {
-    const auto request = opcode == 0x006003 ? Clarett::audioClock(0) : Clarett::audioSync(opcode, 0);
+kern_return_t ClarettAudio::Command(uint32_t opcode, uint32_t rate) {
+    const auto request = opcode == 0x006003 ? Clarett::audioClock(0, rate) : Clarett::audioSync(opcode, 0);
     uint8_t response[4] = {};
     const auto ret = Exchange(opcode, request.payload, request.length, request.expectedLength,
                               response, request.expectedLength >= 4 ? 4 : 0);
     if (ret != kIOReturnSuccess) return ret;
-    if ((opcode == 0x006005 && Clarett::load32(response) != A::Rate) ||
+    if ((opcode == 0x006005 && Clarett::load32(response) != rate) ||
         (opcode == 0x006004 && (Clarett::load32(response) & 1) == 0)) return kIOReturnNotReady;
     return kIOReturnSuccess;
+}
+
+kern_return_t ClarettAudio::ChangeClock(uint32_t rate) {
+    if (!A::rateValid(rate)) return kIOReturnBadArgument;
+    auto ret = Command(0x006003, rate);
+    if (ret != kIOReturnSuccess) return ret;
+    // Preserve the reference SET_CLOCK / sync / commit / rate handshake.
+    ret = Command(0x006004, rate);
+    if (ret != kIOReturnSuccess && ret != kIOReturnNotReady) return ret;
+    ret = Command(0x006002, rate);
+    if (ret != kIOReturnSuccess) return ret;
+    for (unsigned attempt = 0; attempt < 50; ++attempt) {
+        if (__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnAborted;
+        const auto locked = Command(0x006004, rate);
+        if (locked != kIOReturnSuccess && locked != kIOReturnNotReady) return locked;
+        const auto readback = Command(0x006005, rate);
+        if (readback != kIOReturnSuccess && readback != kIOReturnNotReady) return readback;
+        if (locked == kIOReturnSuccess && readback == kIOReturnSuccess) {
+            auto props = OSDictionary::withCapacity(1);
+            if (props) {
+                number(props, "ClarettHardwareSampleRate", rate);
+                SetProperties(props); props->release();
+            }
+            return kIOReturnSuccess;
+        }
+        IOSleep(5); // allow the PLL to settle; never run in the realtime callback
+    }
+    return kIOReturnTimeout;
 }
 
 kern_return_t ClarettAudio::StartAudio() {
     if (__atomic_load_n(&ivars->running, __ATOMIC_ACQUIRE)) return kIOReturnSuccess;
     if (ivars->failed || !ivars->opened || __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
-    const uint32_t opcodes[] = {0x006003u, 0x006004u, 0x006002u, 0x006005u};
-    for (auto opcode : opcodes) {
-        const auto ret = Command(opcode);
-        if (ret != kIOReturnSuccess) return ret;
-    }
+    const auto rate = __atomic_load_n(&ivars->sampleRate, __ATOMIC_ACQUIRE);
+    const auto clockResult = ChangeClock(rate);
+    if (clockResult != kIOReturnSuccess) return clockResult;
     if (!A::build(ivars->audioBytes, A::Bytes, ivars->audioAddress, ivars->periodFrames)) return kIOReturnUnsupported;
     memset(ivars->inputBytes, 0, A::Frames * A::RxChannels * 4);
     memset(ivars->outputBytes, 0, A::Frames * A::TxChannels * 4);
@@ -632,7 +692,7 @@ void IMPL(ClarettAudio, Tick) {
     const auto now = mach_absolute_time();
     const auto gap = now - ivars->lastPoll;
     if (gap > ivars->pollGapMax) ivars->pollGapMax = gap;
-    ivars->latePolls += gap > ivars->ticksPerSecond * ivars->periodFrames / A::Rate;
+    ivars->latePolls += gap > A::ticksForFrames(ivars->ticksPerSecond, ivars->periodFrames, ivars->sampleRate);
     ivars->lastPoll = now;
     PCITransport io(ivars->pci, ivars->bar);
     uint32_t unused = 0, cause = 0;
@@ -648,7 +708,7 @@ void IMPL(ClarettAudio, Tick) {
         });
         Publish("audio-device-disconnected"); return;
     }
-    if (now - ivars->lastEvent > ivars->ticksPerSecond * 75 / 1000) {
+    if (now - ivars->lastEvent > A::ticksForFrames(ivars->ticksPerSecond, A::Frames * 7 / 8, ivars->sampleRate)) {
         StopAudio();
         ivars->controlQueue->DispatchAsync(^{
             if (!__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) ivars->device->SetDeviceIsAlive(false);
@@ -677,11 +737,11 @@ void IMPL(ClarettAudio, Tick) {
             // Publish one timestamp per complete shared ring, not per hardware
             // hardware IRQ. Interpolate a late poll back to the ring boundary.
             const auto framesPastBoundary = ivars->frames - timestampFrame;
-            const auto ticksPastBoundary = framesPastBoundary * ivars->ticksPerSecond / A::Rate;
+            const auto ticksPastBoundary = A::ticksForFrames(ivars->ticksPerSecond, framesPastBoundary, ivars->sampleRate);
             ivars->device->UpdateCurrentZeroTimestamp(timestampFrame, now - ticksPastBoundary);
             ivars->lastTimestamp = timestampFrame;
         }
-        if (ivars->events % (A::Rate / ivars->periodFrames) == 0) {
+        if (ivars->events % (ivars->sampleRate / ivars->periodFrames) == 0) {
             auto props = OSDictionary::withCapacity(7);
             if (props) {
             number(props, "ClarettAudioCallbacks", __atomic_load_n(&ivars->callbacks, __ATOMIC_RELAXED));
@@ -747,15 +807,17 @@ kern_return_t ClarettAudio::Exchange(uint32_t opcode, const uint8_t *payload, ui
 }
 
 kern_return_t ClarettAudio::ReadRoutes(uint32_t *entries) {
-    for (unsigned offset = 0; offset < Clarett::Monitor::Routes; offset += 28) {
-        const auto count = uint8_t(Clarett::Monitor::Routes - offset < 28 ? Clarett::Monitor::Routes - offset : 28);
-        const auto request = Clarett::monitorMuxRead(0, uint8_t(offset), count);
+    const auto band = A::speedBand(ivars->sampleRate);
+    const auto routes = Clarett::Monitor::routeCount(band);
+    for (unsigned offset = 0; offset < routes; offset += 28) {
+        const auto count = uint8_t(routes - offset < 28 ? routes - offset : 28);
+        const auto request = Clarett::monitorMuxRead(0, uint8_t(offset), count, band);
         uint8_t reply[112] = {};
         auto ret = Exchange(request.opcode, request.payload, request.length, request.expectedLength, reply, request.expectedLength);
         if (ret != kIOReturnSuccess) return ret;
         for (unsigned i = 0; i < count; ++i) entries[offset + i] = Clarett::load32(reply + i * 4);
     }
-    if (!Clarett::Monitor::routesValid(entries)) {
+    if (!Clarett::Monitor::routesValid(entries, band)) {
         auto props = OSDictionary::withCapacity(1);
         auto data = OSData::withBytes(entries, Clarett::Monitor::Routes * sizeof(uint32_t));
         if (props && data) { props->setObject("ClarettMonitorUnexpectedRoutes", data); SetProperties(props); }
@@ -773,7 +835,7 @@ kern_return_t ClarettAudio::ReadRow(uint32_t bus, uint16_t *row) {
     return ret;
 }
 kern_return_t ClarettAudio::WriteRoutes(const uint32_t *entries) {
-    const auto request = Clarett::monitorMuxWrite(0, entries);
+    const auto request = Clarett::monitorMuxWrite(0, entries, A::speedBand(ivars->sampleRate));
     return Exchange(request.opcode, request.payload, request.length, 0, nullptr, 0);
 }
 kern_return_t ClarettAudio::WriteRow(uint32_t bus, const uint16_t *row) {
@@ -785,7 +847,7 @@ kern_return_t ClarettAudio::VerifyMonitor() {
     uint32_t routes[Clarett::Monitor::Routes] = {};
     auto ret = ReadRoutes(routes);
     if (ret != kIOReturnSuccess) return ret;
-    if (!Clarett::Monitor::sameRoutes(routes, ivars->monitor.active)) return kIOReturnExclusiveAccess;
+    if (!Clarett::Monitor::sameRoutes(routes, ivars->monitor.active, ivars->monitor.before.band)) return kIOReturnExclusiveAccess;
     for (unsigned b = 0; b < 2; ++b) {
         uint16_t row[Clarett::Monitor::Inputs] = {};
         ret = ReadRow(ivars->monitor.buses[b], row);
@@ -811,7 +873,7 @@ kern_return_t ClarettAudio::DisableMonitor() {
     uint32_t routes[Clarett::Monitor::Routes] = {};
     ret = ReadRoutes(routes);
     if (ret != kIOReturnSuccess) return ret;
-    if (!Clarett::Monitor::sameRoutes(routes, ivars->monitor.before.routes)) return kIOReturnIOError;
+    if (!Clarett::Monitor::sameRoutes(routes, ivars->monitor.before.routes, ivars->monitor.before.band)) return kIOReturnIOError;
     for (unsigned b = 0; b < 2; ++b) {
         uint16_t row[Clarett::Monitor::Inputs] = {};
         ret = ReadRow(ivars->monitor.buses[b], row);
@@ -830,6 +892,7 @@ kern_return_t ClarettAudio::ApplyMonitor(bool enabled, uint32_t inputMode, uint3
     if (ret != kIOReturnSuccess || !enabled) return ret;
     if (ivars->failed || __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
     Clarett::Monitor::Snapshot original = {};
+    original.band = A::speedBand(ivars->sampleRate);
     ret = ReadRoutes(original.routes);
     if (ret != kIOReturnSuccess) return ret;
     for (unsigned bus = 0; bus < Clarett::Monitor::Buses; ++bus) {
@@ -943,7 +1006,7 @@ kern_return_t ClarettAudio::QueueTimingConfiguration(OSDictionary *settings) {
 }
 
 kern_return_t ClarettAudio::PerformTimingChange(uint32_t safety) {
-    if (!A::safetyValid(safety) || !__atomic_load_n(&ivars->timingPending, __ATOMIC_ACQUIRE) ||
+    if (!A::safetyValid(safety) || __atomic_load_n(&ivars->timingPending, __ATOMIC_ACQUIRE) != 1 ||
         safety != __atomic_load_n(&ivars->desiredSafety, __ATOMIC_ACQUIRE)) return kIOReturnBadArgument;
     kern_return_t ret = kIOReturnNotReady;
     // Called by the host only after StopDevice has stopped DMA and drained the
@@ -966,7 +1029,7 @@ kern_return_t ClarettAudio::PerformTimingChange(uint32_t safety) {
         if (ret == kIOReturnSuccess) {
             __atomic_store_n(&ivars->safetyFrames, safety, __ATOMIC_RELEASE);
             __atomic_store_n(&ivars->periodFrames, A::periodForSafety(safety), __ATOMIC_RELEASE);
-            ivars->timerInterval = ivars->ticksPerSecond / (safety == 512 ? 2000 : 4000);
+            ivars->timerInterval = A::pollTicks(ivars->ticksPerSecond, ivars->sampleRate, safety);
         }
     }
     __atomic_store_n(&ivars->timingPending, 0, __ATOMIC_RELEASE);
@@ -975,7 +1038,76 @@ kern_return_t ClarettAudio::PerformTimingChange(uint32_t safety) {
 }
 
 void ClarettAudio::AbortTimingChange(uint32_t safety) {
-    if (safety != __atomic_load_n(&ivars->desiredSafety, __ATOMIC_ACQUIRE)) return;
+    if (__atomic_load_n(&ivars->timingPending, __ATOMIC_ACQUIRE) != 1 ||
+        safety != __atomic_load_n(&ivars->desiredSafety, __ATOMIC_ACQUIRE)) return;
     __atomic_store_n(&ivars->timingPending, 0, __ATOMIC_RELEASE);
     TimingStatus("request-aborted", uint32_t(kIOReturnAborted));
+}
+
+void ClarettAudio::RateStatus(const char *state, uint32_t requested, uint32_t error) {
+    auto props = OSDictionary::withCapacity(6);
+    auto label = OSString::withCString(state);
+    if (props && label) {
+        props->setObject("ClarettRateStatus", label);
+        number(props, "ClarettRateError", error);
+        number(props, "ClarettRequestedSampleRate", requested);
+        const auto rate = __atomic_load_n(&ivars->sampleRate, __ATOMIC_ACQUIRE);
+        number(props, "ClarettAudioSampleRate", rate);
+        number(props, "ClarettAudioLiveCaptureChannels", ivars->liveCapture[A::speedBand(rate)]);
+        SetProperties(props);
+    }
+    OSSafeReleaseNULL(label); OSSafeReleaseNULL(props);
+}
+
+kern_return_t ClarettAudio::PerformSampleRateChange(double rate) {
+    if (!A::rateValid(rate)) return kIOReturnBadArgument;
+    if (__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
+    const auto requested = uint32_t(rate);
+    const auto previous = __atomic_load_n(&ivars->sampleRate, __ATOMIC_ACQUIRE);
+    if (requested == previous) return kIOReturnSuccess;
+    // 1 is an outstanding safety-margin change; 2 owns a rate transition.
+    // This also excludes monitor commands which could touch a different band.
+    uint32_t idle = 0;
+    if (!__atomic_compare_exchange_n(&ivars->timingPending, &idle, 2, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return kIOReturnBusy;
+    idle = 0;
+    if (!__atomic_compare_exchange_n(&ivars->controlPending, &idle, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&ivars->timingPending, 0, __ATOMIC_RELEASE);
+        return kIOReturnBusy;
+    }
+    RateStatus("applying", requested);
+    kern_return_t ret = kIOReturnBusy;
+    if (!__atomic_load_n(&ivars->running, __ATOMIC_ACQUIRE) &&
+        !__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) && !ivars->failed &&
+        !ivars->monitorEnabled && !ivars->monitorDirty) {
+        // No synchronous dispatch to controlQueue here: Core Audio owns the
+        // stopped-I/O configuration callback and may hold the device work queue.
+        auto metadata = [&](uint32_t value) {
+            const auto device = ivars->device->SetSampleRate(value);
+            const auto input = ivars->input->DeviceSampleRateChanged(value);
+            const auto output = ivars->output->DeviceSampleRateChanged(value);
+            return device != kIOReturnSuccess ? device : input != kIOReturnSuccess ? input : output;
+        };
+        ret = ChangeClock(requested);
+        if (ret == kIOReturnSuccess) ret = metadata(requested);
+        if (ret == kIOReturnSuccess) {
+            __atomic_store_n(&ivars->sampleRate, requested, __ATOMIC_RELEASE);
+            ivars->timerInterval = A::pollTicks(ivars->ticksPerSecond, requested, ivars->safetyFrames);
+        } else {
+            // An uncertain mailbox is terminal. Only completed, known exchanges
+            // may be followed by a rollback; never send into a poisoned session.
+            bool restored = false;
+            if (!ivars->failed && !__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) {
+                restored = ChangeClock(previous) == kIOReturnSuccess;
+                if (restored) restored = metadata(previous) == kIOReturnSuccess;
+            }
+            if (!restored) {
+                ivars->failed = true;
+                ivars->device->SetDeviceIsAlive(false);
+            }
+        }
+    }
+    RateStatus(ret == kIOReturnSuccess ? "stable" : "request-failed", requested, uint32_t(ret));
+    __atomic_store_n(&ivars->controlPending, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&ivars->timingPending, 0, __ATOMIC_RELEASE);
+    return ret;
 }

@@ -68,11 +68,11 @@ int main() {
     assert(!A::counterDelta(0x10, 0, frames));
     assert(!permitted(audioClock(0)) && permitted(audioClock(0), true));
     auto clock = audioClock(0); clock.payload[0] = 0x44;
-    assert(!permitted(clock, true)); // rate is fixed; no arbitrary clock writes
+    assert(!permitted(clock, true)); // unsupported rates cannot become arbitrary clock writes
     for (auto op : {0x6004u, 0x6002u, 0x6005u}) {
         assert(permitted(audioSync(op, 1), true));
         assert(!permitted(audioSync(op, 1)));
     }
     assert(!permitted(audioSync(0x800001, 1), true)); // no configuration writes
-    puts("PASS: audio descriptor bounds, 4KB page containment, padded capture, wrapping, hardware counters and fixed clock command scope");
+    puts("PASS: audio descriptor bounds, 4KB page containment, padded capture, wrapping, hardware counters and restricted clock command scope");
 }

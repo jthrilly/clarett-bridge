@@ -48,11 +48,11 @@ The default build stage is `audio`. Other stages remain useful during hardware r
 
 - `attach`: PCI attachment and capability read, no device DMA.
 - `mailbox`: six identification queries, then quiesce.
-- `audio`: 48 kHz playback/capture and monitor controls.
+- `audio`: 44.1–96 kHz playback/capture and monitor controls.
 
 Build with `scripts/build.sh attach ...` or `scripts/build.sh mailbox ...`. The script regenerates the correct driver source list and entitlements for the selected stage. Changing only a build-mode string does not choose the implementation.
 
-The host build number and driver build number are independent. `CLARETT_HOST_VERSION` controls the host number; `CLARETT_BUILD_VERSION` overrides the selected stage’s driver number when an actual driver update needs a new version. A cosmetic host update does not require incrementing the already tested driver.
+The host build number and driver build number are independent. `CLARETT_HOST_VERSION` controls the host number; `CLARETT_BUILD_VERSION` overrides the selected stage’s driver number when an actual driver update needs a new version. A cosmetic host update does not require incrementing the already tested driver. The sample-rate update uses host build 14 and audio driver build 13; it requires activating the new driver when upgrading from version 12.
 
 ## Install and update
 

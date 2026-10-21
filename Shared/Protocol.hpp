@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "Monitor.hpp"
+#include "SampleRate.hpp"
 
 namespace Clarett {
 constexpr uint32_t Execute = 0x80000000;
@@ -28,21 +29,22 @@ struct Request {
     uint8_t payload[512];
 };
 
-inline Request streamInfo(uint16_t sequence) {
-    return { StreamInfo, sequence, 1, 4, { 0 } }; // base sample-rate band
+inline Request streamInfo(uint16_t sequence, uint8_t band = 0) {
+    return { StreamInfo, sequence, 1, 4, { band } };
 }
 inline Request firmwareInfo(uint16_t sequence) {
     // GET_DATA offset 8, length 8: application/FPGA identification words only.
     return { GetData, sequence, 8, 8, { 8, 0, 0, 0, 8, 0, 0, 0 } };
 }
-inline Request audioClock(uint16_t sequence) {
-    return { 0x006003, sequence, 8, 0, { 0x80, 0xbb, 0, 0, 24, 0, 0, 0 } }; // 48 kHz, internal
+inline Request audioClock(uint16_t sequence, uint32_t rate = Audio::DefaultRate) {
+    return { 0x006003, sequence, 8, 0,
+        { uint8_t(rate), uint8_t(rate >> 8), uint8_t(rate >> 16), uint8_t(rate >> 24), 24, 0, 0, 0 } }; // internal clock only
 }
 inline Request audioSync(uint32_t opcode, uint16_t sequence) {
     return { opcode, sequence, 0, uint16_t(opcode == 0x006002 ? 0 : 4), {} };
 }
-inline Request monitorMuxRead(uint16_t seq, uint8_t offset, uint8_t count) {
-    return { 0x003001, seq, 4, uint16_t(count * 4), {offset, 0, count, 0} };
+inline Request monitorMuxRead(uint16_t seq, uint8_t offset, uint8_t count, uint8_t band = 0) {
+    return { 0x003001, seq, 4, uint16_t(count * 4), {offset, 0, count, band} };
 }
 inline Request monitorMixRead(uint16_t seq, uint16_t bus) {
     return { 0x002001, seq, 4, 60, {uint8_t(bus), uint8_t(bus >> 8), 30, 0} };
@@ -55,35 +57,43 @@ inline Request monitorMixWrite(uint16_t seq, unsigned bus, const uint16_t *row) 
     for (unsigned i = 0; i < 30; ++i) put16(r.payload + 2 + i * 2, row[i]);
     return r;
 }
-inline Request monitorMuxWrite(uint16_t seq, const uint32_t *routes) {
-    Request r = {0x003002, seq, 260, 0, {}}; // band 0 + 48 destinations + 16 padding words
-    for (unsigned i = 0; i < Monitor::Routes; ++i) put32(r.payload + 4 + i * 4, routes[i]);
+inline Request monitorMuxWrite(uint16_t seq, const uint32_t *routes, uint8_t band = 0) {
+    const auto count = Monitor::routeCount(band);
+    Request r = {0x003002, seq, uint16_t(4 + (count + 16) * 4), 0, {}};
+    put32(r.payload, uint32_t(band) << 16);
+    for (unsigned i = 0; i < count; ++i) put32(r.payload + 4 + i * 4, routes[i]);
     return r;
 }
 inline bool permitted(const Request &r, bool audio = false, bool controls = false) {
     if (controls) {
-        if (r.opcode == 0x003001 && r.length == 4 && r.payload[1] == 0 && r.payload[3] == 0 &&
-            r.payload[2] >= 1 && r.payload[2] <= 28 && unsigned(r.payload[0]) + r.payload[2] <= Monitor::Routes &&
+        if (r.opcode == 0x003001 && r.length == 4 && r.payload[1] == 0 && r.payload[3] <= 1 &&
+            r.payload[2] >= 1 && r.payload[2] <= 28 && unsigned(r.payload[0]) + r.payload[2] <= Monitor::routeCount(r.payload[3]) &&
             r.expectedLength == r.payload[2] * 4) return true;
         if (r.opcode == 0x002001 && r.length == 4 && load16(r.payload) < Monitor::Buses &&
             load16(r.payload + 2) == Monitor::Inputs && r.expectedLength == 60) return true;
         if (r.opcode == 0x002002 && r.length == 62 && load16(r.payload) < Monitor::Buses && r.expectedLength == 0) return true;
-        if (r.opcode == 0x003002 && r.length == 260 && r.expectedLength == 0 && load32(r.payload) == 0) {
+        if (r.opcode == 0x003002 && r.expectedLength == 0 &&
+            (load32(r.payload) == 0 || load32(r.payload) == 0x10000)) {
+            const auto band = load32(r.payload) >> 16;
+            const auto count = Monitor::routeCount(band);
+            if (r.length != 4 + (count + 16) * 4) return false;
             uint32_t routes[Monitor::Routes] = {};
-            for (unsigned i = 0; i < Monitor::Routes; ++i) routes[i] = load32(r.payload + 4 + i * 4);
-            for (unsigned i = 4 + Monitor::Routes * 4; i < r.length; ++i) if (r.payload[i]) return false;
-            return Monitor::routesValid(routes);
+            for (unsigned i = 0; i < count; ++i) routes[i] = load32(r.payload + 4 + i * 4);
+            for (unsigned i = 4 + count * 4; i < r.length; ++i) if (r.payload[i]) return false;
+            return Monitor::routesValid(routes, band);
         }
     }
     if (audio) {
-        const auto clock = audioClock(r.sequence);
+        const auto rate = load32(r.payload);
+        const auto clock = audioClock(r.sequence, rate);
         bool same = r.opcode == clock.opcode && r.length == clock.length && r.expectedLength == 0;
+        same &= Audio::rateValid(rate);
         for (size_t i = 0; i < 8; ++i) same &= r.payload[i] == clock.payload[i];
         if (same) return true;
         if ((r.opcode == 0x006004 || r.opcode == 0x006002 || r.opcode == 0x006005) &&
             r.length == 0 && r.expectedLength == (r.opcode == 0x006002 ? 0 : 4)) return true;
     }
-    if (r.opcode == StreamInfo && r.length == 1 && r.expectedLength == 4 && r.payload[0] == 0)
+    if (r.opcode == StreamInfo && r.length == 1 && r.expectedLength == 4 && r.payload[0] <= 1)
         return true;
     const auto f = firmwareInfo(r.sequence);
     if (r.opcode != f.opcode || r.length != f.length || r.expectedLength != f.expectedLength)

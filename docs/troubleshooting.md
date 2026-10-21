@@ -14,7 +14,7 @@ If a new driver is activated while the old version owns the device, stop audio, 
 
 ## Silence
 
-Choose Clarett 2Pre Thunderbolt (Experimental) in the audio app and use a 48 kHz project. Check the physical output/headphone controls and the selected channels. The host control app does not create playback itself. “Streaming” indicates an open audio engine, not confirmed audible output.
+Choose Clarett 2Pre Thunderbolt (Experimental) in the audio app and match its project rate to the active rate. Start at 48 kHz when comparing against the previous listening-tested baseline. Check the physical output/headphone controls and the selected channels. The host control app does not create playback itself. “Streaming” indicates an open audio engine, not confirmed audible output.
 
 ## Crackling
 
@@ -37,3 +37,11 @@ Keep Full Security and SIP enabled. This app does not change startup security or
 ## Hardware monitor change failed or uncertain
 
 Read the diagnostic status. A routing conflict may mean the original snapshot cannot safely be restored over another controller’s changes. A transport error may leave the device’s volatile state uncertain; the driver stops further commands for that session. Cold power cycling returns to the device’s saved configuration. No flash-save command is provided.
+
+## Sample-rate control is unavailable or a change fails
+
+Version 12 exposes only 48 kHz; activate driver 13 and reconnect the powered interface to attach it. The new selector reads the live list, so installing only a new host app does not unlock additional rates.
+
+Turn direct monitoring off and wait for verified restoration before a rate change. Stop audio in other apps if a request is rejected. Read the active nominal rate, input/output stream formats and `ClarettHardwareSampleRate`, not just the selected value. A DAW can request its own project rate.
+
+If the driver reports a failed or uncertain clock transaction, it may mark the device unavailable. Reconnect or cold power cycle to recover the session; do not keep submitting commands to a poisoned mailbox. Only internal clock and 44.1/48/88.2/96 kHz are implemented. The 14-channel transport has 10 live input slots at double speed.

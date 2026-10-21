@@ -87,6 +87,28 @@ int main() {
         std::printf("%s\n  Device ID: %u; alive: %u; running: %u\n  Rate: %.0f Hz; buffer: %u frames\n  Channels: %u input, %u output\n",
                     text.c_str(), device, alive, running, rate, frames,
                     channels(device, kAudioObjectPropertyScopeInput), channels(device, kAudioObjectPropertyScopeOutput));
+        p = {kAudioDevicePropertyAvailableNominalSampleRates, global, kAudioObjectPropertyElementMain};
+        UInt32 rateSize = 0;
+        if (AudioObjectGetPropertyDataSize(device, &p, 0, nullptr, &rateSize) == noErr && rateSize && rateSize % sizeof(AudioValueRange) == 0) {
+            std::vector<AudioValueRange> rates(rateSize / sizeof(AudioValueRange));
+            if (AudioObjectGetPropertyData(device, &p, 0, nullptr, &rateSize, rates.data()) == noErr) {
+                std::printf("  Available rates (Hz):");
+                for (const auto &rate : rates) std::printf(" %.0f–%.0f", rate.mMinimum, rate.mMaximum);
+                std::putchar('\n');
+            }
+        }
+        for (auto scope : {kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput}) {
+            p = {kAudioDevicePropertyStreams, scope, kAudioObjectPropertyElementMain};
+            UInt32 streamBytes = 0;
+            if (AudioObjectGetPropertyDataSize(device, &p, 0, nullptr, &streamBytes) != noErr || !streamBytes) continue;
+            std::vector<AudioStreamID> streams(streamBytes / sizeof(AudioStreamID));
+            if (AudioObjectGetPropertyData(device, &p, 0, nullptr, &streamBytes, streams.data()) != noErr) continue;
+            for (auto stream : streams) {
+                AudioStreamBasicDescription format{}; UInt32 formatSize = sizeof(format);
+                if (get(stream, kAudioStreamPropertyPhysicalFormat, global, &format, formatSize))
+                    std::printf("  %s stream: %.0f Hz, %u channels\n", scope == kAudioObjectPropertyScopeInput ? "Input" : "Output", format.mSampleRate, format.mChannelsPerFrame);
+            }
+        }
         clients(device);
     }
     if (!found) std::puts("No Clarett Core Audio device found.");

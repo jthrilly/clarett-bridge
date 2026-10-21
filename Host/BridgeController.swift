@@ -31,11 +31,19 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
     @Published var monitorEnabled = false
     @Published var monitorUncertain = false
     @Published var sampleRate: Double = 0
+    @Published var selectedRate: Double = 48000
+    @Published var rateOptions: [Double] = []
+    @Published var rateAvailable = false
+    @Published var rateBusy = false
+    @Published var rateMessage = "Sample-rate control requires the updated audio driver."
     @Published var hardwarePeriod: UInt32 = 0
     @Published var hardwareOverruns: UInt64 = 0
     @Published var bufferMessage = "Choose a requested buffer, then check the active value."
     private var lastMonitorConfiguration = ""
     private var lastSafety: UInt32 = 0
+    private var lastRate: Double = 0
+    private var requestedRate: Double?
+    private var rateDeadline: Date?
     private var audioDevice: AudioDeviceID = 0
     private static let monitorSelector: AudioObjectPropertySelector = 0x636c6d63
     private static let timingSelector: AudioObjectPropertySelector = 0x636c7470
@@ -48,6 +56,8 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
             attached = true; streaming = true; audioDeviceAvailable = true
             monitorAvailable = true; timingAvailable = true
             sampleRate = 48000; actualBuffer = 512; selectedBuffer = 128
+            rateOptions = [44100, 48000, 88200, 96000]; rateAvailable = true
+            rateMessage = "48 kHz is active. Internal clock."
             actualSafety = 256; selectedSafety = 256; hardwarePeriod = 128
             summary = "Audio streaming at 48 kHz."
             message = "Driver is available."
@@ -60,6 +70,9 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
             self?.refresh()
         }
         refresh()
+    }
+    static func rateLabel(_ rate: Double) -> String {
+        (rate / 1000).formatted(.number.precision(.fractionLength(0...1))) + " kHz"
     }
     func activate() {
         pending = true
@@ -126,7 +139,13 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
             var property = address(kAudioDevicePropertyDeviceIsAlive)
             audioDeviceAvailable = AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &alive) == noErr && alive != 0
         }
-        guard audioDeviceAvailable else { monitorAvailable = false; timingAvailable = false; actualBuffer = 0; actualSafety = 0; sampleRate = 0; return }
+        guard audioDeviceAvailable else {
+            monitorAvailable = false; timingAvailable = false; rateAvailable = false
+            actualBuffer = 0; actualSafety = 0; sampleRate = 0; lastRate = 0
+            rateOptions = []; rateBusy = false; requestedRate = nil; rateDeadline = nil
+            rateMessage = "Connect the interface to change its sample rate."
+            return
+        }
         var property = address(kAudioDevicePropertyBufferFrameSize)
         var frames: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
@@ -136,7 +155,42 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
         }
         property = address(kAudioDevicePropertyNominalSampleRate)
         var rate: Double = 0; size = UInt32(MemoryLayout<Double>.size)
-        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &rate) == noErr { sampleRate = rate }
+        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &rate) == noErr {
+            sampleRate = rate
+            if rate != lastRate {
+                selectedRate = rate; lastRate = rate
+                if requestedRate == nil { rateMessage = "\(Self.rateLabel(rate)) is active. Internal clock." }
+            }
+        }
+        var settable = DarwinBoolean(false)
+        let canSetRate = AudioObjectIsPropertySettable(audioDevice, &property, &settable) == noErr && settable.boolValue
+        property = address(kAudioDevicePropertyAvailableNominalSampleRates)
+        size = 0
+        rateOptions = []
+        if AudioObjectGetPropertyDataSize(audioDevice, &property, 0, nil, &size) == noErr,
+           size > 0 && size % UInt32(MemoryLayout<AudioValueRange>.size) == 0 {
+            var ranges = [AudioValueRange](repeating: AudioValueRange(), count: Int(size) / MemoryLayout<AudioValueRange>.size)
+            let status = ranges.withUnsafeMutableBytes { bytes in
+                AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, bytes.baseAddress!)
+            }
+            if status == noErr {
+                rateOptions = [44100, 48000, 88200, 96000].filter { candidate in
+                    ranges.contains { candidate >= $0.mMinimum && candidate <= $0.mMaximum }
+                }
+            }
+        }
+        rateAvailable = canSetRate && rateOptions.count > 1
+        if let target = requestedRate {
+            if sampleRate == target {
+                rateMessage = "\(Self.rateLabel(sampleRate)) is active. Internal clock."
+                rateBusy = false; requestedRate = nil; rateDeadline = nil
+            } else if let deadline = rateDeadline, Date() > deadline {
+                rateMessage = "Rate change was not confirmed. Active: \(Self.rateLabel(sampleRate)). Check Diagnostics."
+                rateBusy = false; requestedRate = nil; rateDeadline = nil
+            }
+        } else if !rateAvailable {
+            rateMessage = "Activate driver version 13 or later to enable sample-rate changes."
+        }
         var range = AudioValueRange()
         size = UInt32(MemoryLayout<AudioValueRange>.size)
         property = address(kAudioDevicePropertyBufferFrameSizeRange)
@@ -154,6 +208,22 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
         if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &safety) == noErr {
             actualSafety = safety
             if safety != lastSafety { selectedSafety = [256, 512].contains(safety) ? safety : 256; lastSafety = safety }
+        }
+    }
+    func applyRate() {
+        guard rateAvailable && rateOptions.contains(selectedRate) && !monitorEnabled && !monitorUncertain else {
+            rateMessage = "Turn direct monitoring off before changing sample rate."
+            return
+        }
+        var property = address(kAudioDevicePropertyNominalSampleRate)
+        var rate = selectedRate
+        let status = AudioObjectSetPropertyData(audioDevice, &property, 0, nil, UInt32(MemoryLayout<Double>.size), &rate)
+        if status == noErr {
+            requestedRate = rate; rateDeadline = Date(timeIntervalSinceNow: 20); rateBusy = true
+            rateMessage = "Waiting for Core Audio and hardware readback…"
+            refresh()
+        } else {
+            rateMessage = "Rate request failed (\(status)). Stop audio in other apps, turn direct monitoring off and retry."
         }
     }
     func applyTiming() {
@@ -225,9 +295,16 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
                     monitorInput = input; monitorOutput = output; monitorBlend = blend; lastMonitorConfiguration = signature
                 }
             }
-            summary = state == "audio-device-ready" ? "Audio ready at 48 kHz." : state == "audio-streaming" ? "Audio streaming at 48 kHz." : "Driver status: \(state)"
+            let rate = (properties["ClarettAudioSampleRate"] as? NSNumber)?.doubleValue ?? 48000
+            summary = state == "audio-device-ready" ? "Audio ready at \(Self.rateLabel(rate))." : state == "audio-streaming" ? "Audio streaming at \(Self.rateLabel(rate))." : "Driver status: \(state)"
             monitorBusy = (properties["ClarettControlPending"] as? NSNumber)?.boolValue ?? false
             timingBusy = (properties["ClarettTimingPending"] as? NSNumber)?.boolValue ?? false
+            if let target = requestedRate,
+               (properties["ClarettRequestedSampleRate"] as? NSNumber)?.doubleValue == target,
+               properties["ClarettRateStatus"] as? String == "request-failed" {
+                rateMessage = "Hardware rate change failed. Check Diagnostics; the active value is read separately."
+                requestedRate = nil; rateDeadline = nil; rateBusy = false
+            }
             if let timingState = properties["ClarettTimingStatus"] as? String {
                 timingMessage = timingState == "stable" ? "Driver margin applied. Choose an app buffer separately above." :
                     timingState == "applying" ? "Waiting for Core Audio configuration change…" : "Margin change failed. Check Diagnostics."

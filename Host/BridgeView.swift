@@ -26,7 +26,8 @@ enum BridgePage: String, CaseIterable, Identifiable {
 }
 
 enum BridgeStyle {
-    static let accent = Color(red: 0.08, green: 0.56, blue: 0.48)
+    static let accent = Color(red: 0.85, green: 0.16, blue: 0.20)
+    static let iconShadow = Color(red: 0.40, green: 0.035, blue: 0.055)
     static let canvas = Color(nsColor: .windowBackgroundColor)
     static let card = Color(nsColor: .controlBackgroundColor)
     static let line = Color.primary.opacity(0.08)
@@ -103,7 +104,7 @@ struct BridgeView: View {
                     Text(controller.audioDeviceAvailable ? "Clarett 2Pre" : "No interface connected").font(.caption)
                 }
                 Text("Independent, experimental driver").font(.system(size: 10)).foregroundStyle(.secondary)
-                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0")")
+                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0")")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             }.padding(20)
         }.frame(width: 194).background(Color(nsColor: .underPageBackgroundColor).opacity(0.45))
@@ -126,7 +127,7 @@ struct BridgeView: View {
                 }
                 Divider().padding(.vertical, 15)
                 HStack {
-                    Metric(label: "SAMPLE RATE", value: controller.sampleRate > 0 ? "\(Int(controller.sampleRate / 1000)) kHz" : "—")
+                    Metric(label: "SAMPLE RATE", value: controller.sampleRate > 0 ? BridgeController.rateLabel(controller.sampleRate) : "—")
                     Spacer()
                     Metric(label: "TRANSPORT CHANNELS", value: "14 in / 4 out")
                     Spacer()
@@ -198,14 +199,40 @@ struct BridgeView: View {
                     }
                     if controller.monitorBusy { ProgressView().controlSize(.small) }
                 }
-                .disabled(!controller.monitorAvailable || controller.monitorBusy || controller.pending)
+                .disabled(!controller.monitorAvailable || controller.monitorBusy || controller.rateBusy || controller.pending)
                 Text(controller.monitorMessage).font(.caption).foregroundStyle(.secondary).padding(.top, 6).textSelection(.enabled)
-            }.disabled(!controller.monitorAvailable || controller.pending)
+            }.disabled(!controller.monitorAvailable || controller.rateBusy || controller.pending)
             NoteCard(icon: "waveform", title: "One monitoring path at a time", text: "Turn off software input monitoring in your audio app when using this hardware mix. To hear software effects, turn direct monitoring off and monitor in the app instead.")
         }
     }
     private var audio: some View {
         Group {
+            BridgeCard {
+                SectionHeading(icon: "waveform", title: "Sample rate")
+                Text("One internal clock serves playback and capture. Changing rate briefly stops audio; recording apps may choose their own rate.")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack(spacing: 22) {
+                    Picker("Sample rate", selection: $controller.selectedRate) {
+                        if controller.rateOptions.isEmpty { Text("Interface unavailable").tag(controller.selectedRate) }
+                        ForEach(controller.rateOptions, id: \.self) { Text(BridgeController.rateLabel($0)).tag($0) }
+                    }.labelsHidden().frame(maxWidth: 220)
+                    Spacer()
+                    Button("Apply rate") { controller.applyRate() }.buttonStyle(.borderedProminent)
+                }.padding(.top, 12)
+                    .disabled(!controller.rateAvailable || controller.rateBusy || controller.timingBusy || controller.monitorBusy || controller.pending || controller.monitorEnabled || controller.monitorUncertain)
+                HStack {
+                    Text("Active sample rate").font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    if controller.rateBusy { ProgressView().controlSize(.small) }
+                    Text(controller.sampleRate > 0 ? BridgeController.rateLabel(controller.sampleRate) : "Unavailable").font(.callout.weight(.semibold))
+                }.padding(12).background(BridgeStyle.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                Text(controller.rateMessage).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                if controller.monitorEnabled || controller.monitorUncertain {
+                    Text("Turn direct monitoring off in Monitoring before switching rate.").font(.caption).foregroundStyle(.secondary)
+                }
+                Text("At 88.2/96 kHz, 10 capture channels are live; the four unused ADAT transport slots are silenced.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             BridgeCard {
                 SectionHeading(icon: "slider.horizontal.3", title: "Driver responsiveness")
                 Text("The driver margin gives audio time to reach the hardware. Changing it briefly restarts audio.")
@@ -217,7 +244,7 @@ struct BridgeView: View {
                     }.labelsHidden().frame(maxWidth: 340)
                     Spacer()
                     Button("Apply margin") { controller.applyTiming() }.buttonStyle(.borderedProminent)
-                }.padding(.top, 12).disabled(!controller.timingAvailable || controller.timingBusy || controller.pending)
+                }.padding(.top, 12).disabled(!controller.timingAvailable || controller.timingBusy || controller.rateBusy || controller.pending)
                 AppliedValue(value: controller.actualSafety, label: "Driver margin", busy: controller.timingBusy).padding(.top, 12)
                 Text(controller.timingMessage).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 if controller.actualSafety > 0 && controller.actualSafety < 256 {
@@ -234,7 +261,7 @@ struct BridgeView: View {
                     }.labelsHidden().frame(maxWidth: 220)
                     Spacer()
                     Button("Request buffer") { controller.applyBuffer() }.buttonStyle(.bordered)
-                }.padding(.top, 12).disabled(!controller.audioDeviceAvailable || controller.pending)
+                }.padding(.top, 12).disabled(!controller.audioDeviceAvailable || controller.rateBusy || controller.pending)
                 AppliedValue(value: controller.actualBuffer, label: "Active Core Audio buffer", busy: false).padding(.top, 12)
                 if controller.actualBuffer > 0 && controller.selectedBuffer != controller.actualBuffer {
                     Label("Selected \(controller.selectedBuffer) · Active \(controller.actualBuffer)", systemImage: "info.circle")
@@ -288,7 +315,7 @@ struct BridgeView: View {
             NoteCard(icon: "checkmark.shield", title: "Keep Full Security enabled", text: "Use the normal macOS extension approval flow. This app does not require Recovery Mode or change boot security, SIP or device-management settings. Approval policies can differ on other Macs.")
             BridgeCard {
                 SectionHeading(icon: "info.circle", title: "About this project")
-                Text("Independent open-source software. Not affiliated with or endorsed by Focusrite. The current driver supports 48 kHz playback and capture; MIDI, other sample rates and Focusrite Control compatibility are not implemented.")
+                Text("Independent open-source software. Not affiliated with or endorsed by Focusrite. Playback and capture support 44.1, 48, 88.2 and 96 kHz with the internal clock. MIDI, external clocks and Focusrite Control compatibility are not implemented.")
                     .font(.callout).foregroundStyle(.secondary)
                 Link("Source and documentation ↗", destination: URL(string: "https://github.com/jthrilly/clarett-bridge")!).padding(.top, 8)
             }
@@ -299,7 +326,7 @@ struct BridgeView: View {
 struct BridgeMark: View {
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 10).fill(LinearGradient(colors: [Color(red: 0.85, green: 0.16, blue: 0.20), Color(red: 0.40, green: 0.035, blue: 0.055)], startPoint: .topTrailing, endPoint: .bottomLeading))
+            RoundedRectangle(cornerRadius: 10).fill(LinearGradient(colors: [BridgeStyle.accent, BridgeStyle.iconShadow], startPoint: .topTrailing, endPoint: .bottomLeading))
             Image(systemName: "waveform.path").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
         }.accessibilityHidden(true)
     }

@@ -6,7 +6,7 @@ Test date: **21 October 2026**. Hardware: original Clarett 2Pre Thunderbolt, App
 | --- | --- |
 | Full Security | User independently ran `sudo bputil -d` and reported Full Security |
 | SIP | Read directly with `csrutil status`; enabled |
-| Activation / attachment | Normal signed system-extension activation and PCI matching; version 12 active |
+| Activation / attachment | Normal signed system-extension activation and PCI matching; version 12 baseline |
 | Mailbox | Six alternating identification queries, validated replies and repeated firmware words |
 | Playback | User confirmed clear Spotify playback |
 | Capture | User confirmed clear Audacity recording/listen-back |
@@ -41,3 +41,9 @@ This is a source/development release, not a generally provisioned binary driver.
 The user performed manual listening/recording tests. No agent-generated test tone, connected cable loopback or numerical round-trip measurement was used. Individual software effects were not separately qualified. Sleep/wake, sustained stress, arbitrary hot-unplug scenarios, other models/Macs and public distribution signing remain unqualified.
 
 The first mailbox/audio implementations and corrected failures remain documented in the historical notes. A successful compile/signature or zero overrun count alone must not be described as an audio pass.
+
+## Sample-rate update (0.2.0 / driver 13)
+
+Implemented rates: 44.1, 48, 88.2 and 96 kHz, internal clock. New hardware validation is pending activation. The historical listening results above cover the version 12 / 48 kHz baseline, not all new rates.
+
+The signed local build and sanitizer checks pass. New tests cover strict rate/clock-source allowlists, speed-band read bounds and routing preservation, correct double-speed packet lengths/padding, S/MUX residue suppression, rate-scaled polling, ring-wrap watchdogs and timestamp conversion. The red-accent previews are generated from the real SwiftUI views with example data.

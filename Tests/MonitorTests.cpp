@@ -7,18 +7,19 @@
 #include <initializer_list>
 #include <vector>
 namespace M = Clarett::Monitor;
-static M::Snapshot fixture() {
+static M::Snapshot fixture(unsigned band = 0) {
     M::Snapshot s = {};
+    s.band = band;
     unsigned n = 0;
     for (unsigned i = 0; i < 4; ++i) s.routes[n++] = ((0x300 + (i & 1)) << 12) | (0x400 + i);
     for (unsigned i = 0; i < 30; ++i) s.routes[n++] = 0x300 + i;
-    for (unsigned i = 0; i < 14; ++i) s.routes[n++] = (0x400u << 12) | (0x600 + i);
+    for (unsigned i = 0; i < (band == 0 ? 14u : 10u); ++i) s.routes[n++] = (0x400u << 12) | (0x600 + i);
     // Active original rows use slots 10/11; slots 0..3 are free to configure.
     s.routes[M::routeIndex(s.routes, 0x30a)] = (0x600u << 12) | 0x30a;
     s.routes[M::routeIndex(s.routes, 0x30b)] = (0x601u << 12) | 0x30b;
     s.rows[0][10] = s.rows[1][11] = 8192;
     for (unsigned b = 2; b < 16; ++b) for (unsigned i = 0; i < 30; ++i) s.rows[b][i] = uint16_t(b * 30 + i);
-    assert(n == 48 && M::routesValid(s.routes));
+    assert(n == M::routeCount(band) && M::routesValid(s.routes, band));
     return s;
 }
 struct Wire final : Clarett::Transport {
@@ -107,5 +108,33 @@ int main() {
     assert(!Clarett::permitted(Clarett::monitorMixRead(0, 16), true, true));
     auto flash = Clarett::monitorMixRead(0, 0); flash.opcode = 0x800002;
     assert(!Clarett::permitted(flash, true, true));
-    puts("PASS: monitor routing preservation, unused buses/slots, 2Pre pins, mono/stereo, blend headroom, snapshot retention and control allowlist");
+    const auto high = fixture(1);
+    for (unsigned mode = 1; mode <= 3; ++mode) for (unsigned pair = 1; pair <= 3; ++pair)
+        for (unsigned blend : {0u, 50u, 100u}) {
+            M::Plan p;
+            assert(M::build(high, {true, mode, pair, blend}, p));
+            assert(p.before.band == 1 && M::sameRoutes(p.before.routes, high.routes, 1));
+            assert(M::routesValid(p.setup, 1) && M::routesValid(p.active, 1));
+            for (unsigned i = 0; i < M::routeCount(1); ++i) {
+                const auto dst = high.routes[i] & 4095;
+                if (dst >= 0x600) assert(p.active[i] == high.routes[i]);
+            }
+            auto command = Clarett::monitorMuxWrite(3, p.active, 1);
+            assert(command.length == 244 && Clarett::load32(command.payload) == 0x10000);
+            assert(Clarett::permitted(command, true, true));
+            command.payload[4 + 44*4] = 1; assert(!Clarett::permitted(command, true, true));
+        }
+    auto highBad = high;
+    highBad.routes[0] = (0x204u << 12) | 0x400; // unavailable ADAT source at double speed
+    assert(!M::routesValid(highBad.routes, 1));
+    highBad = high; highBad.routes[43] = 0x60a; // missing ADAT destination
+    assert(!M::routesValid(highBad.routes, 1));
+    auto wrongBand = Clarett::monitorMuxWrite(0, original.routes);
+    Clarett::put32(wrongBand.payload, 0x10000);
+    assert(!Clarett::permitted(wrongBand, true, true)); // cannot send base geometry to band 1
+    assert(Clarett::permitted(Clarett::monitorMuxRead(0, 28, 16, 1), true, true));
+    assert(!Clarett::permitted(Clarett::monitorMuxRead(0, 28, 17, 1), true, true));
+    assert(!Clarett::permitted(Clarett::monitorMuxRead(0, 0, 28, 2), true, true));
+    assert(!M::routesValid(high.routes, 2));
+    puts("PASS: single/double-speed monitor routing preservation, unused buses/slots, 2Pre pins, mono/stereo, blend headroom, snapshot retention and control allowlist");
 }

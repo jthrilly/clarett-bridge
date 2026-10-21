@@ -4,7 +4,15 @@
 
 The overview shows the detected Core Audio sample rate, transport channel counts and active buffer. “Streaming” means an audio client has opened the engine, not that a listening test has passed. The app does not generate a tone, start a recording or change your default audio device.
 
-Select **Clarett 2Pre Thunderbolt (Experimental)** in the recording or playback application. The current format is 48 kHz, 32-bit signed interleaved PCM carrying 24-bit hardware samples. The 14 input and 4 output transport channels include digital/routing slots; they do not mean fourteen analogue sockets.
+Select **Clarett 2Pre Thunderbolt (Experimental)** in the recording or playback application. The format uses 32-bit signed interleaved PCM carrying 24-bit hardware samples, at 44.1, 48, 88.2 or 96 kHz with driver 13 or later. The 14 input and 4 output transport channels include digital/routing slots; they do not mean fourteen analogue sockets.
+
+## Sample rate
+
+In **Audio Settings → Sample rate**, choose 44.1, 48, 88.2 or 96 kHz and click **Apply rate**. Turn hardware direct monitoring off first and wait for verified restoration. The hardware clock and both Core Audio stream formats change together during a stopped-I/O configuration change. Check the active value after the request; an audio app can request a different rate when it opens the device. A running app may need its project rate changed or audio stopped before accepting the switch.
+
+The default is 48 kHz after reattachment. The four choices are read from the active driver's advertised capabilities; the earlier version 12 driver offers only 48 kHz. Activate driver 13 to use the new selector. An activation request alone does not replace an attached old driver until it detaches.
+
+The transport remains 14 input / 4 output at every supported rate. At 88.2/96 kHz, four ADAT channels disappear, leaving 10 live capture slots. The driver zeros the unused tail in each capture callback to suppress hardware residue. Direct monitoring uses the matching single/double-speed routing table when enabled again. External clocks and 176.4/192 kHz are not currently offered.
 
 ## Hardware direct monitoring
 

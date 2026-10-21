@@ -24,8 +24,8 @@ struct RenderAssets {
                     let context = NSGraphicsContext.current!.cgContext
                     context.scaleBy(x: CGFloat(pixels) / 1024, y: CGFloat(pixels) / 1024)
                     let background = NSBezierPath(roundedRect: NSRect(x: 40, y: 40, width: 944, height: 944), xRadius: 218, yRadius: 218)
-                    NSGradient(starting: NSColor(srgbRed: 0.40, green: 0.035, blue: 0.055, alpha: 1),
-                               ending: NSColor(srgbRed: 0.85, green: 0.16, blue: 0.20, alpha: 1))!.draw(in: background, angle: 65)
+                    NSGradient(starting: NSColor(BridgeStyle.iconShadow),
+                               ending: NSColor(BridgeStyle.accent))!.draw(in: background, angle: 65)
                     let path = NSBezierPath()
                     let points: [(CGFloat, CGFloat)] = [(206,512),(302,512),(365,650),(435,342),(515,714),(590,330),(660,568),(718,512),(818,512)]
                     path.move(to: NSPoint(x: points[0].0, y: points[0].1))
@@ -45,7 +45,8 @@ struct RenderAssets {
                 let model = BridgeController(preview: true)
                 if disconnected {
                     model.attached = false; model.streaming = false; model.audioDeviceAvailable = false
-                    model.monitorAvailable = false; model.timingAvailable = false
+                    model.monitorAvailable = false; model.timingAvailable = false; model.rateAvailable = false
+                    model.rateOptions = []; model.rateMessage = "Connect the interface to change its sample rate."
                     model.sampleRate = 0; model.actualBuffer = 0; model.actualSafety = 0
                     model.summary = "Connect and power on your Clarett."
                     model.deviceStatus = "No Clarett driver service is attached."

@@ -72,3 +72,7 @@ Sanitized tests cover route preservation, mixer resources, 2Pre pins, mono/stere
 - [PortAudio Core Audio implementation](https://github.com/PortAudio/portaudio/blob/master/src/hostapi/coreaudio/pa_mac_core.c).
 - [Apple AudioDriverKit sample](https://developer.apple.com/documentation/audiodriverkit/creating-an-audio-device-driver) and DriverKit 27 SDK headers.
 - [snd-clarett](https://github.com/JustALawnGnome7/snd-clarett) snapshot `fd416d45b74941663f703281666b33c9eccbda6e` and [clarett-sre](https://github.com/JustALawnGnome7/clarett-sre) snapshot `4df059996ecf781f5603f5395d6fe1bf6d56c1f7` for protocol geometry, pins and period servicing.
+
+## Sample-rate changes (driver 13)
+
+Turn hardware monitoring off and wait for verified restoration before changing rate. The monitor snapshot is specific to a speed band: 48 route entries at 44.1/48 kHz, 44 at 88.2/96 kHz. Re-enabling monitoring reads and preserves the current band's routes/mixer state; it does not replay the previous band's snapshot. Routing packets include the selected band and the matching destination count. The 30-input × 16-bus mixer and analogue/PCM monitor sources are unchanged.

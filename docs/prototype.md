@@ -1,5 +1,7 @@
 # Prototype decisions
 
+*Historical milestone notes. For the current rate-aware driver and control app, see [architecture](architecture.md), [user guide](user-guide.md) and [validation](validation.md).*
+
 ## Initial scope
 
 The first executable driver is attachment-only. Mailbox support is a separate build mode and version so activation/PCI matching can be diagnosed before permitting device DMA. No Core Audio or MIDI framework is required at this stage.
