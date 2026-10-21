@@ -7,11 +7,19 @@
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleName</key>
-	<string>Clarett Probe</string>
+	<string>Clarett Bridge</string>
+	<key>CFBundleDisplayName</key>
+	<string>Clarett Bridge</string>
+	<key>CFBundleIconFile</key>
+	<string>ClarettBridge</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
+	<key>ClarettDriverIdentifier</key>
+	<string>org.codaco.ClarettProbe.driver</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1</string>
+	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>

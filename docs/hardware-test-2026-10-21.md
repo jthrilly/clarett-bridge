@@ -1,4 +1,6 @@
-# Clarett DriverKit activation and mailbox test
+# Historical activation and mailbox test
+
+This records the initial mailbox stage. For the current audio/control app, see [validation](validation.md) and [user guide](user-guide.md).
 
 Date: 21 October 2026. Result: **PASS for the activation and mailbox milestone. Audio is not implemented.**
 
@@ -8,7 +10,7 @@ The Apple Development signed DriverKit extension activated through the normal ma
 
 - Original Focusrite Clarett 2Pre Thunderbolt, PCI identity `1cb5:0002`.
 - MacBook Pro, M5 Max, macOS 27.0.1; Xcode 27 / DriverKit 27 SDK.
-- Extension `org.codaco.ClarettProbe.driver`, version `0.1/4`, team `85EZ69PQHJ`, activated and enabled.
+- Extension `org.codaco.ClarettProbe.driver`, version `0.1/4`, activated and enabled.
 - **Full Security:** user ran `sudo bputil -d` and reported Full Security before activation. The agent did not independently authenticate to read boot policy. SIP alone does not prove Full Security.
 - **SIP:** directly checked after the successful mailbox run; enabled.
 - No changes to boot security, SIP, FileVault, MDM enrollment or endpoint protection. No recovery key was needed by the prototype.
@@ -47,7 +49,7 @@ After the six queries, the driver disables device DMA, clears the advertised res
 
 ## Deliverables and limits
 
-Source repository: `/Users/jmh629/Projects/clarett-driverkit` on `main`. Installed app: `/Applications/Clarett Probe.app`. The app remains available to inspect results or request normal deactivation. Build artifacts and provisioning material are ignored by Git; no remote repository was created.
+At this milestone the project was local and the host was named Clarett Probe. The current public project is Clarett Bridge. Build artifacts and provisioning material are ignored by Git.
 
 This proves the DriverKit activation, PCI-access and response-DMA mailbox path on this Mac under the user-confirmed Full Security policy. It does not establish audio playback/capture, MIDI, sample-clock control, interrupts, latency, sleep/wake, sustained reliability or support for other devices. Other Macs and future policy/profile changes need their own validation. Shipping a public driver also requires the relevant distribution entitlements and signing workflow.
 

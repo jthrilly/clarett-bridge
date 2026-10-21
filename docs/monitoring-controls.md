@@ -1,96 +1,74 @@
-# Monitoring controls and current validation
+# Monitoring and latency
 
-## Result on 21 October 2026
+## Tested settings
 
-The user confirmed that hardware direct monitoring works on activated version 8. The registry also reports successful monitor disable and restoration (`off-restored`, error 0, uncertain 0). This is separate from the earlier version 6 tests confirming clear Spotify playback and clear Audacity recording/listen-back.
+| Driver margin | Hardware period | Result |
+| --- | --- | --- |
+| 512 frames | 256 frames | Conservative default; clear playback and monitoring |
+| 256 frames | 128 frames | Clear GarageBand monitoring with acceptable perceived delay |
+| 128 frames | 64 frames | Crackling and worse perceived delay; returned to 256 |
+| 64 frames (earlier build) | 64 frames | Crackling, including after a cold reset |
 
-The initial low-margin software monitoring test crackled at multiple Core Audio buffer settings. The user also increased Audacity's own buffer to 100 ms without resolving it. Zero hardware-overrun flags do not establish sample continuity. The crackle persisted after a cold reset on the same version 8 build, making stale volatile hardware state less likely. Version 10 passed compilation, signature/profile checks, sanitized tests and hardware attachment. The user confirmed both live monitoring and ordinary playback crackle on version 10. Version 11 restores the previously clear version 6 timing settings while preserving the controls and diagnostics; macOS accepted it, and the user confirmed both ordinary playback and software monitoring are clear. Hardware attachment reports safety 512 frames and period 256 frames, with zero late output writes, input-ahead callbacks or hardware overruns in the observed test.
+The successful GarageBand test used an **effective 512-frame Core Audio client buffer**. A 128-frame buffer request was accepted but the active value remained 512; do not call that a successful 128-frame buffer test. Device/app buffering and the driver margin are separate controls.
 
-Full Security was confirmed by the user earlier with `sudo bputil -d`; SIP was checked independently. No startup-security or management setting was changed.
+The normal UI offers margins 256 and 512. The research command-line timing API retains 128 for diagnosis. A reattachment returns to the conservative 512 default. Smaller buffers being accepted does not prove reliable low-latency audio. No numerical round-trip latency was measured.
 
-## Runtime margin control (version 12)
+## Runtime changes
 
-Version 12 is activated and attached. It boots with the clear version 11 baseline (512-frame safety, 256-frame hardware period). Its new `cltp` custom dictionary property accepts only `SafetyFrames` values 128, 256 or 512. The old crackling 64-frame setting is deliberately excluded.
+The `cltp` custom dictionary property accepts only `SafetyFrames` values 128, 256 or 512. The driver calls `RequestDeviceConfigurationChange`. Only `ClarettDevice::PerformDeviceConfigurationChange`, after the host stops I/O, updates input/output safety offsets. The next engine start rebuilds descriptors for a period half that margin; the HAL ring remains 4096 frames. Existing I/O restarts through Core Audio.
 
-The driver requests `RequestDeviceConfigurationChange`; only `ClarettDevice::PerformDeviceConfigurationChange`, after the host stops I/O, may update the input/output safety offsets. The hardware period becomes half the selected margin; new descriptors are built only on the following engine start. The HAL ring remains 4096 frames. Core Audio automatically restarts existing I/O. Failed and aborted requests are reported separately from the applied value. Nothing is saved to flash.
-
-A runtime change from 512 to 256 completed successfully on the test hardware: Core Audio and the driver both read back safety 256, the hardware period became 128, the pending flag cleared, and streaming resumed. The user confirmed clean playback and monitoring with the 256-frame margin, but excessive monitoring delay remained. A subsequent 128-frame margin test produced crackling and worse perceived delay, so the driver was returned to 256. An attempted app-buffer request of 128 was accepted, but the running clients retained a 512-frame effective buffer; this must not be reported as a successful 128-frame test.
-
-The host now has a separate Driver safety margin picker. 512 is the initial verified baseline. The 256-frame setting also passed the user’s clarity test; 128 has now failed and should not be used for normal monitoring. A scrollable window keeps the additional controls accessible. The native automation connection failed during installation; the user opened version 12, activated it and reconnected the hardware. Subsequent verification used Core Audio APIs and I/O Registry readback.
-
-For equivalent strict command-line configuration:
+The applied value is read back independently. Failed/aborted requests do not appear as successful changes. The host’s requested value is not substituted for actual device state. Nothing is saved to device flash.
 
 ```sh
-zsh scripts/audio-configure.sh margin 512  # known clear fallback
-zsh scripts/audio-configure.sh margin 256  # experimental
-zsh scripts/audio-configure.sh margin 128  # experimental
-zsh scripts/audio-configure.sh buffer 128  # app may override; verify actual value
+zsh scripts/audio-configure.sh margin 512
+zsh scripts/audio-configure.sh margin 256
+zsh scripts/audio-configure.sh buffer 128
 zsh scripts/audio-status.sh
 ```
 
-The utility matches the exact prototype device UID. It does not start I/O, play or record audio, or change default devices. The existing status utility remains read-only. Tests cover all permitted descriptor cadences and rejection of invalid periods and margins. Audio/attachment builds and signature/profile checks pass.
+The configuration utility matches only the exact prototype device UID. It does not start an audio stream, play, record or change default devices. The status tool is read-only and reports running clients associated with the Clarett.
 
-## Controls
+## Hardware direct monitoring
 
-The host offers Core Audio buffer sizes 64, 128, 256, 512, 1024 and 2048 frames, filtered against the live supported range. On this Mac Core Audio reported 15–1536, so 2048 is omitted. The active value is read back after setting. Audio applications can select a different size when opening their engine; this control does not replace an application's own additional buffering.
+The monitor dictionary accepts only Enabled, InputMode, OutputPair and Blend with strict types/ranges. Choices are input 1 centered, input 2 centered or stereo inputs 1/2; outputs 1/2, outputs 3/4 (headphone path) or both; and complementary live-input/computer gains. Each created mixer row has total gain at most unity.
 
-Hardware monitoring offers input 1 centered, input 2 centered, or stereo inputs 1/2; outputs 1/2, outputs 3/4, or both; and complementary live-input/computer blend from 0 to 100 percent. The total row gain is at most unity. Turn off software input monitoring when evaluating this direct path to avoid hearing two differently delayed copies.
+Before first enable, the driver snapshots all 48 routes and all 16 × 30 mixer coefficients. It selects two buses unused by existing routes and input slots whose reassignment cannot change any original active mix. It rejects a request if safe resources are unavailable. The analogue input pins on the 2Pre are 0x400 and 0x402.
 
-The monitor request uses a typed AudioDriverKit custom dictionary property. Only Enabled, InputMode, OutputPair and Blend are accepted, with strict type/range checks. An accepted request is distinct from verified device state. UI status comes from the driver's apply/readback result.
+The driver stages input routes and mix coefficients before switching requested outputs, then verifies routes and both rows. Disable checks ownership of the active plan, restores the original routes and borrowed rows, and verifies that restoration. Changes by another controller are treated as conflicts. Known-complete partial writes can be rolled back; an uncertain transport failure poisons further command submission.
 
-## Device changes and restoration
+The allowlist permits MUX_READ, GET_MIX, SET_MIX and SET_MUX only with model-specific geometry and band 0. There is no arbitrary configuration or flash-save API. Settings are volatile. Disable monitoring and wait for verified restoration before an upgrade or disconnect: unplugging can prevent restoration, and a warm reconnect can retain volatile routes after the original in-memory snapshot is lost. A cold power cycle restores the saved device configuration.
 
-Before the first enable, the driver reads all 48 routes and all 16 mixer rows. It reserves two mixer buses unused by existing routes and finds input slots whose reassignment cannot affect any existing active mix. If safe resources are unavailable, it rejects the request. The 2Pre analogue source pins are 0x400 and 0x402.
+The user confirmed this hardware monitor works. Keep software monitoring off when using it; two paths produce differently delayed copies. For software effects, disable hardware monitoring and use the recording app’s monitor path. Specific plug-ins have not been separately qualified.
 
-Enable stages mixer rows and input routes before switching the selected output destinations. Every completed change is read back. Disable first checks that the owned routes and rows still match the active plan, then restores and verifies the original routes and the two borrowed mixer rows. Changes from another controller are treated as conflicts. A transport failure poisons the session and is reported as uncertain when writes may have taken effect.
+## Audacity-specific delay
 
-The fixed allowlist permits MUX_READ, GET_MIX, SET_MIX and SET_MUX only with model-specific geometry and band 0. There is no flash-save command or arbitrary configuration API. Settings are volatile. Disable monitoring and wait for verified restoration before an upgrade or disconnect: removal can prevent the old driver from restoring routes, and a warm reconnect can retain the volatile device state without the original in-memory snapshot. A cold power cycle is the recovery path for lost volatile state.
+The saved Audacity 4.0.1 buffer preference was verified as 10 ms, but its monitoring remained too delayed. Inspection of the official source found a separate path in `au3/libraries/au3-audio-io/AudioIO.cpp`:
 
-## Scheduling and diagnostics
+- Lines 602–604 select PortAudio’s defaultLowOutputLatency for software playthrough.
+- Lines 648–650 select defaultHighInputLatency for that path, rather than the configured latency-duration preference.
 
-Mailbox controls run on their own serialized queue. An atomic ownership handoff and a period-queue barrier keep mailbox cause registers separate from audio period ACKs. The period timer continues servicing the two audio cause blocks during a command. HAL PCM callbacks contain no mailbox calls, MMIO, allocations or locks. Queues survive until driver free, and queued property requests retain the driver until completion.
+Enumerating device info through Audacity’s installed PortAudio library, without opening a stream, reported:
 
-Version 8 uses a 64-frame hardware period and a 64-frame input/output safety offset, while the HAL ring remains 4096 frames. The timer targets 250 microseconds. Those settings are experimental; a small buffer being accepted does not prove reliable low-latency audio.
-
-Version 10 additionally measures maximum poll gap, MMIO read-block duration, event gap, late polls, input requests extending beyond the last confirmed capture frame, and output writes beginning behind the confirmed hardware frame. The confirmed frame position is quantized to completed hardware events, so an input-ahead count within one period is diagnostic evidence rather than proof of invalid samples. Counters reset on an engine restart. The reference driver explicitly warns that cumulative hardware counters can remain smooth despite audible timing faults.
-
-## Checks and remaining work
-
-Sanitized tests cover route preservation, available mixer resources, 2Pre pins, mono/stereo modes, output pairs, blend headroom, snapshot retention, exact command serialization and command permissions. Protocol and DMA/ring tests continue to pass. Audio and attachment targets compile against Xcode 27.
-
-Version 10 initial telemetry showed zero late polls, zero input-ahead callbacks, zero late output writes, a maximum poll gap of 516 microseconds and maximum MMIO read-block duration of 46 microseconds. A later extended observation reached one late poll and two input-ahead callbacks (maximum 24 frames, below the 64-frame event quantization). Both runs reported zero hardware overruns. These counters do not identify the audible fault.
-
-Version 11 restores a 512-frame input/output safety offset, 256-frame hardware period and 500-microsecond timer target. These are the version 6 settings that passed clear playback and capture tests. Client buffer selection remains available, but the conservative driver margin adds latency; reliable reduced-latency streaming is not yet claimed.
-
-Verified: clean software monitoring with acceptable perceived delay in GarageBand at margin 256. Pending: reliable margins below 256 frames, sustained-load/sleep-wake tests, and measured round-trip latency. No test tone or agent recording is used; the user performs audible tests. Rates other than 48 kHz, external clocking, MIDI and Focusrite Control compatibility remain unsupported.
-
-## Primary references
-
-- [Apple audio-driver sample](https://developer.apple.com/documentation/audiodriverkit/creating-an-audio-device-driver) and the installed AudioDriverKit 27 SDK headers.
-- [snd-clarett](https://github.com/JustALawnGnome7/snd-clarett), pinned research snapshot `fd416d45b74941663f703281666b33c9eccbda6e`, particularly period-servicer timing diagnostics and mixer command serialization.
-- [clarett-sre](https://github.com/JustALawnGnome7/clarett-sre), snapshot `4df059996ecf781f5603f5395d6fe1bf6d56c1f7`, 2Pre route geometry and pins.
-
-## Audacity monitoring latency investigation
-
-On 21 October 2026 the user reported that version 12 at margin 256 and a software buffer selection of 128 was clean, but monitoring delay remained excessive. Core Audio readback during the investigation still showed an effective 512-frame device buffer; a picker selection alone does not prove the requested buffer is active. The only running client identified by the read-only Core Audio process API at that moment was Audacity (`org.audacityteam.audacity4`). Its saved AudioIO.LatencyDuration value was 10.0 ms, with a 48 kHz default project rate.
-
-The official Audacity 4.0.1 source explains why that preference does not directly control this monitoring path. In `au3/libraries/au3-audio-io/AudioIO.cpp`, lines 602–604 select PortAudio’s defaultLowOutputLatency for software playthrough, and lines 648–650 select defaultHighInputLatency. The configured latency duration is used in the other branch. Loading the installed Audacity PortAudio library and enumerating device info, without opening a stream, reported these Clarett defaults at margin 256:
-
-| Default | Reported value |
+| Default | Value at margin 256 |
 | --- | ---: |
 | Low input | 10.0 ms |
 | High input | 100.0 ms |
 | Low output | 7.333 ms |
 | High output | 16.667 ms |
 
-Thus Audacity requests a 100 ms input latency hint for this path even with its buffer preference set to 10 ms. This is a requested hint, not a measured round-trip latency, and it does not explain or excuse the driver’s separate crackling at margins 64/128. No installed Audacity binary, library or signature was modified.
+Thus Audacity requests a 100 ms input-latency **hint** for software playthrough even with its buffer preference at 10 ms. This is not a measured round-trip latency and does not explain or excuse the driver’s separate small-margin crackling. No installed Audacity binary, library or signature was modified. GarageBand was already installed and provided an independent successful software-monitoring test.
 
-GarageBand is already installed. The user tested it with the Clarett selected for both directions and input monitoring on an audio track, keeping hardware monitoring disabled, and confirmed clean monitoring with acceptable delay. Core Audio identified GarageBand as the only active Clarett client, with the device at 48 kHz, driver safety 256 frames, hardware period 128 frames and effective client buffer 512 frames. The driver reported zero overruns, input-ahead callbacks and late output writes during the observed test. This verifies a usable separate software-monitoring path without changing driver security or installing another application. Specific effects and measured round-trip latency were not separately tested.
+## Scheduling and diagnostic limits
 
-Sources: [Audacity 4.0.1 AudioIO.cpp](https://github.com/audacity/audacity/blob/Audacity-4.0.1/au3/libraries/au3-audio-io/AudioIO.cpp#L602-L652), [PortAudio Core Audio implementation](https://github.com/PortAudio/portaudio/blob/master/src/hostapi/coreaudio/pa_mac_core.c), and [Apple GarageBand input-monitoring guide](https://support.apple.com/guide/garageband/turn-on-input-monitoring-for-audio-tracks-gbnd4bc15233/mac). Downloaded source was inspected only; it was not built or executed. The read-only process diagnostics enumerate only running clients associated with the Clarett device.
+Control commands run on a serialized queue with an atomic ownership handoff and period-queue barrier. Stream period handling continues on its own cause registers during mailbox work. HAL PCM callbacks contain no MMIO, mailbox calls, allocation or locks.
 
-## Working configuration
+The driver measures maximum poll gap, MMIO read duration, event gap, late polls, input requests beyond the last confirmed hardware frame and output writes behind it. The confirmed position is quantized to hardware events. These diagnostics can remain apparently healthy during audible corruption; zero overruns alone is not a pass. Counters reset on engine restart.
 
-Use driver version 12, 48 kHz, and a 256-frame Driver safety margin for the verified GarageBand monitoring path. The effective Core Audio buffer in this test was 512 frames. Do not equate the host app’s selected 128-frame request with an applied 128-frame buffer. Return to margin 512 if needed; margins 64 and 128 have failed clarity tests. Driver attachment resets the margin to the conservative 512-frame default, so select 256 again after reconnecting if desired.
+Sanitized tests cover route preservation, mixer resources, 2Pre pins, mono/stereo modes, output pairs, blend headroom, restoration snapshots, exact command serialization and descriptor cadence/bounds. See [validation](validation.md) for hardware results and unqualified cases.
 
-Hardware direct monitoring was separately confirmed by the user on version 8, with restoration read back when disabled. Its implementation is retained in version 12. Keep that hardware monitor disabled when evaluating the software path. No cable loopback or test tone was used, and no numerical round-trip latency claim is made. Full Security was previously confirmed by the user, SIP remains enabled, and no security-policy or device-management setting was changed.
+## Sources
+
+- [Audacity 4.0.1 AudioIO.cpp](https://github.com/audacity/audacity/blob/Audacity-4.0.1/au3/libraries/au3-audio-io/AudioIO.cpp#L602-L652).
+- [PortAudio Core Audio implementation](https://github.com/PortAudio/portaudio/blob/master/src/hostapi/coreaudio/pa_mac_core.c).
+- [Apple AudioDriverKit sample](https://developer.apple.com/documentation/audiodriverkit/creating-an-audio-device-driver) and DriverKit 27 SDK headers.
+- [snd-clarett](https://github.com/JustALawnGnome7/snd-clarett) snapshot `fd416d45b74941663f703281666b33c9eccbda6e` and [clarett-sre](https://github.com/JustALawnGnome7/clarett-sre) snapshot `4df059996ecf781f5603f5395d6fe1bf6d56c1f7` for protocol geometry, pins and period servicing.

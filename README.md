@@ -1,91 +1,81 @@
-# Clarett DriverKit probe
+# Clarett Bridge
 
-An experimental macOS DriverKit prototype for the original Focusrite Clarett 2Pre **Thunderbolt** interface. Activation, mailbox identification, clear playback and recording, and direct hardware monitoring have passed manual tests on the test Mac. Version 12 provides clear software monitoring with acceptable perceived delay in GarageBand at a 256-frame driver margin. Audacity’s software-monitoring path requests a 100 ms input latency hint; its delay is application-specific. Margins of 64/128 frames crackle.
+**An independent macOS driver and control app for the original Focusrite Clarett 2Pre Thunderbolt.**
 
-**Hardware milestone passed on 21 October 2026:** version `0.1/4` activated, attached and completed all six mailbox queries on the test Mac, with SIP enabled and Full Security confirmed by the user. See [test evidence and limits](docs/hardware-test-2026-10-21.md).
+Clarett Bridge connects this interface to Core Audio through DriverKit and AudioDriverKit. It provides playback, recording, hardware direct monitoring and adjustable driver margins while keeping Full Security enabled on the tested Mac.
 
-## Build stages
+![Clarett Bridge overview](docs/images/overview.png)
 
-- **attach** (default, version 1): open PCI endpoint `1cb5:0002`, validate the BAR, disable bus-master DMA, and read the capabilities register. No mailbox commands or device DMA are issued.
-- **mailbox** (version 4): allocate/map a response buffer, establish the mailbox session, and alternate six read-only queries for stream geometry and application/FPGA identification. The session stops on its first transport or validation error.
-- **audio** (source version 12): retain the PCI/mailbox session and expose an AudioDriverKit duplex device at 48 kHz, with four playback and fourteen capture transport channels. Version 6 passed clear Spotify playback and Audacity recording/listen-back. Version 8 adds software buffer controls and hardware direct monitoring; the user confirmed the latter works, but software monitoring crackles at multiple buffer sizes. Version 10 adds timing diagnostics and lifecycle fixes; the user reported both playback and monitoring crackle. Version 11 restores version 6 timing settings; the user confirmed ordinary playback and software monitoring are clear. Version 12 preserves that default and adds runtime safety-margin selection through Core Audio’s configuration-change handshake; the user confirmed clean, acceptably responsive GarageBand monitoring at margin 256, while margin 128 failed.
+*Representative interface preview. Readiness, active settings and diagnostics in the app come from the connected device; this image uses example values.*
 
-The PCI identity is shared by multiple Clarett/Red models. The mailbox stage checks the 2Pre's reported transport geometry before issuing firmware-info queries. Transport slots must not be interpreted as physical input counts.
+## Current status
 
-Full Security and SIP are requirements for the experiment. A successful compile, valid signature, extension activation, PCI attachment, and successful mailbox replies are separate milestones. None implies the others.
+This is an **experimental source release**, tested on one Clarett 2Pre Thunderbolt with an Apple silicon Mac running macOS 27.0.1 and Xcode 27. It is independent of Focusrite and is not endorsed by the manufacturer.
 
-## Requirements
+| Feature | Result |
+| --- | --- |
+| Driver activation and PCI attachment | Passed with user-confirmed Full Security; SIP enabled |
+| Playback and recording | Clear Spotify playback and Audacity recording/listen-back |
+| Software monitoring | Clean, acceptably responsive monitoring in GarageBand at a 256-frame driver margin |
+| Hardware direct monitoring | Input 1/2 or stereo mix, selectable output pairs and live/computer blend; manually verified |
+| Sample rate | 48 kHz, internal clock |
+| Transport channels | 14 capture / 4 playback; these are not physical socket counts |
+| Margins below 256 frames | Unreliable: crackling observed at 64 and 128 frames |
+| MIDI, other rates, external clocks, Focusrite Control | Not implemented |
 
-- Xcode 27 with the DriverKit 27 SDK (the tested build environment).
-- A paid Apple Developer team with development DriverKit and development PCI capabilities enabled for the driver App ID.
-- Permission to approve a new system extension on the test Mac. Device management can independently affect activation.
-- A powered Clarett Thunderbolt connected to a working Thunderbolt chain.
+The verified software-monitoring test used an **effective 512-frame Core Audio buffer**. Selecting a requested buffer in the app does not guarantee another audio application will use it. Numerical round-trip latency, sustained load and sleep/wake are not yet qualified. See [validation](docs/validation.md).
 
-The Xcode project's default team is the existing local development team, `85EZ69PQHJ`. Override `DEVELOPMENT_TEAM` when building on another account. Signing identities, provisioning profiles and private keys are not checked in.
+## Build and install
 
-## Build and verify
-
-```sh
-scripts/test.sh
-scripts/build.sh attach CODE_SIGNING_ALLOWED=NO
-scripts/build.sh attach -allowProvisioningUpdates -allowProvisioningDeviceRegistration
-python3 scripts/verify-signing.py
-```
-
-For the mailbox build:
+There is no broadly installable signed binary in this release. A developer build requires Xcode 27 / DriverKit 27, an Apple Developer team, and provisioning with the DriverKit, PCI and audio-family development entitlements. The current driver deployment target is macOS 27.
 
 ```sh
-scripts/build.sh mailbox -allowProvisioningUpdates -allowProvisioningDeviceRegistration
-python3 scripts/verify-signing.py 'build/mailbox/Build/Products/Debug/Clarett Probe.app'
+git clone https://github.com/jthrilly/clarett-bridge.git
+cd clarett-bridge
+bash scripts/test.sh
+scripts/build.sh audio DEVELOPMENT_TEAM=YOUR_TEAM_ID -allowProvisioningUpdates
+python3 scripts/verify-signing.py 'build/audio/Build/Products/Debug/Clarett Bridge.app'
 ```
 
-The project is generated by `scripts/generate-project.py`, using only Python's standard library. Generated project and Info/entitlement files are committed so the project can also be opened directly in Xcode. The build script selects the generated driver class and stage. The generated project can be opened in Xcode; run the build script again to switch stages. Directly changing only `CLARETT_PROBE_MODE` does not select a different driver implementation.
+New developers must register their own bundle identifiers and capabilities; see the [complete build and signing guide](docs/building.md). Install the verified app in `/Applications`, open **Driver Setup → Activate driver**, and complete the normal macOS approval flow. Keep Full Security and SIP enabled. Device-management approval policy may differ on other Macs.
 
-Set `CLARETT_BUILD_VERSION` to a higher integer for subsequent installed updates. When macOS accepts an update while an older driver owns the PCI device, reconnect the Thunderbolt device to finish the replacement. A power cycle may be needed after a failed mailbox session; reconnect the cable while the unit is powered on if Thunderbolt does not enumerate after power-up.
+The app is now named **Clarett Bridge**. Existing driver identifiers and device identity retain the earlier `ClarettProbe` name for installation compatibility. The Xcode project and scheme are still named `ClarettProbe`. The redesigned host app can operate the existing version 12 audio driver.
 
-For the audio build:
+## Use it
+
+1. Select **Clarett 2Pre Thunderbolt (Experimental)** as the input and output in your audio app.
+2. For **software monitoring and effects**, use **Audio Settings → Driver responsiveness → 256 frames** and enable monitoring in your audio app. GarageBand passed the manual listening test. Turn hardware monitoring off for this path.
+3. For **hardware direct monitoring**, open **Monitoring**, choose inputs and outputs, adjust the live/computer blend, then enable monitoring. Turn the audio app’s software monitoring off to avoid two delayed copies.
+4. Check the **active** buffer value after a request. Audio apps may override it. The driver margin resets to 512 when the device reattaches; choose 256 again if desired.
+
+Audacity 4.0.1’s software-monitoring path requests its audio library’s high input-latency hint, which was 100 ms on the test Mac even with Audacity’s buffer preference at 10 ms. That is separate from driver crackling at smaller margins. See [monitoring and latency](docs/monitoring-controls.md).
+
+![Monitoring controls](docs/images/monitoring.png)
+
+*Representative monitoring preview; changes are applied explicitly and the resulting route/mixer state is read back.*
+
+## Documentation
+
+- [User guide](docs/user-guide.md): monitoring, buffers, driver setup and removal.
+- [Build and signing](docs/building.md): requirements, identifiers, entitlements and build stages.
+- [Architecture](docs/architecture.md): host, PCI/mailbox, DMA, audio timeline and configuration changes.
+- [Monitoring and latency](docs/monitoring-controls.md): mixer preservation, runtime profiles and app buffering.
+- [Validation and limitations](docs/validation.md): exactly what has been tested.
+- [Troubleshooting](docs/troubleshooting.md): no hardware, silence, crackling, delay and activation issues.
+- [Initial feasibility](docs/feasibility.md) and [historical mailbox result](docs/hardware-test-2026-10-21.md).
+- [Contributing](CONTRIBUTING.md) and [third-party provenance](THIRD_PARTY.md).
+
+## Command-line tools
 
 ```sh
-scripts/build.sh audio -allowProvisioningUpdates -allowProvisioningDeviceRegistration
-python3 scripts/verify-signing.py 'build/audio/Build/Products/Debug/Clarett Probe.app'
+zsh scripts/audio-status.sh                 # Read-only device/client report
+zsh scripts/audio-configure.sh margin 256   # Briefly restarts existing I/O
+zsh scripts/audio-configure.sh buffer 128   # Request; verify actual result
+bash scripts/package-source.sh HEAD         # ZIP and tar.gz of committed source
 ```
 
-This adds the development `com.apple.developer.driverkit.family.audio` entitlement; it must be granted by the embedded profile and real signature. No unrestricted user-client entitlement is used. See [audio implementation and manual test](docs/audio-streaming.md) and [monitor controls and validation](docs/monitoring-controls.md).
+CI runs sanitized C++ protocol/ring/mixer tests, checks generated project files, and type-checks the SwiftUI host. It does not sign, activate a driver or validate audio hardware. The project includes no credentials, provisioning profiles, certificates, private keys or device UDIDs.
 
-## Installation and activation
+## License and provenance
 
-Install the verified signed app at `/Applications/Clarett Probe.app`. Launch it, then choose **Activate Driver**. Complete any macOS approval prompt yourself. Do not turn off SIP, enable system-extension developer mode, or reduce startup security to make this experiment pass.
-
-The host reports extension-request results separately from the device's registry diagnostics. The driver must report `attached-register-read-ok` for the attach milestone, or `mailbox-six-transactions-ok` with six completed transactions for the mailbox milestone. The audio stage reports `audio-device-ready` after device creation, and `audio-streaming` when Core Audio starts its engine. Neither status proves audible playback or a correct recording. Record the actual boot security policy independently; `csrutil status` confirms SIP only, not Full Security.
-
-Read-only diagnostic commands:
-
-```sh
-systemextensionsctl list
-ioreg -r -n ClarettProbe -l -w0
-/usr/bin/log show --last 10m --predicate 'eventMessage CONTAINS "ClarettProbe:"' --style compact
-csrutil status
-sudo bputil -d
-```
-
-The final command needs administrator authentication and reads boot policy. The app does not request or change boot security policy, FileVault keys, MDM enrollment or firmware.
-
-Use **Deactivate Driver** in the app for normal removal; follow macOS's restart instructions if any. Do not use `systemextensionsctl reset` as a cleanup step because it affects other extensions.
-
-## Protocol boundaries
-
-`Shared/Protocol.hpp` contains the command allowlist and response state machine. The mailbox stage accepts only `STREAM_INFO{band=0}` and `GET_DATA{offset=8,length=8}`. The attach/mailbox implementation has no arbitrary command API or user client, no routing/configuration writes, no flash operations, no clock changes, and no audio-engine arming. Transient PCI command, mailbox handshake, interrupt-cause mask and response-address writes are necessary for communication. The audio implementation additionally uses the framework-provided HAL user client and a separate fixed allowlist for SET_CLOCK{48000,Internal} and the three sync queries. It programs audio descriptors and ring-control registers. It provides no arbitrary configuration or flash API.
-
-The mailbox stage uses bounded polling, not interrupt callbacks. It requires the response-landed phase plus the matching response opcode, sequence, successful status, and a bounded response length before acknowledging the command. STREAM_INFO must contain at least the four-byte geometry prefix (the test 2Pre returns 24 bytes); GET_DATA must return exactly eight bytes. A failed transaction permanently stops that session. DMA is disabled and the PCI session closed before mappings are released.
-
-Tests exercise delayed payload arrival, stale sequences, invalid lengths, device errors, disconnects, timeouts, terminal failure behaviour and the read-command allowlist. They run with AddressSanitizer and UndefinedBehaviorSanitizer; they are not hardware validation.
-
-## Research and provenance
-
-See [feasibility](docs/feasibility.md) and [implementation decisions](docs/prototype.md).
-
-Protocol research: [clarett-sre](https://github.com/JustALawnGnome7/clarett-sre), snapshot `4df059996ecf781f5603f5395d6fe1bf6d56c1f7`.
-Reference Linux implementation: [snd-clarett](https://github.com/JustALawnGnome7/snd-clarett), snapshot `fd416d45b74941663f703281666b33c9eccbda6e`.
-Apple signing: [How to sign a DEXT](https://developer.apple.com/forums/thread/809202).
-
-The implementation uses the documented protocol and Apple's installed SDK interfaces. No Focusrite binary was disassembled or modified. This project is independent of Focusrite and is licensed under GPL-2.0-only; see `LICENSE`.
+[GPL-2.0-only](LICENSE). Protocol research and the reference Linux driver are credited in [THIRD_PARTY.md](THIRD_PARTY.md). No Focusrite binary was modified or disassembled. Focusrite and Clarett are their owners’ trademarks.

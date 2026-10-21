@@ -7,8 +7,10 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-app = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('build/attach/Build/Products/Debug/Clarett Probe.app')
-driver = app / 'Contents/Library/SystemExtensions/org.codaco.ClarettProbe.driver.dext'
+app = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('build/audio/Build/Products/Debug/Clarett Bridge.app')
+host_info = plistlib.loads((app/'Contents/Info.plist').read_bytes())
+driver_id = host_info.get('ClarettDriverIdentifier', 'org.codaco.ClarettProbe.driver')
+driver = app / ('Contents/Library/SystemExtensions/' + driver_id + '.dext')
 
 def run(*args):
     return subprocess.run(args, check=True, capture_output=True).stdout

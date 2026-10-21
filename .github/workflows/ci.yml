@@ -1,0 +1,26 @@
+name: Source checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  protocol-tests:
+    name: Sanitized protocol, DMA and mixer tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: bash scripts/test.sh
+      - name: Check generated project
+        run: |
+          python3 scripts/generate-project.py audio
+          git diff --exit-code -- ClarettProbe.xcodeproj Driver/Info.plist Driver/ClarettProbe.entitlements Host/Info.plist Host/ClarettProbe.entitlements
+      - name: Check Python tooling
+        run: python3 -m py_compile scripts/generate-project.py scripts/verify-signing.py
+  swiftui:
+    name: Type-check macOS interface
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: xcrun swiftc -typecheck -parse-as-library -module-cache-path build/ModuleCache Host/*.swift

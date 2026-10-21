@@ -5,106 +5,14 @@ import IOKit
 import AppKit
 import CoreAudio
 
-@main
-struct ClarettProbeApp: App {
-    @StateObject private var controller = ProbeController()
-    var body: some Scene {
-        WindowGroup("Clarett Probe") {
-            ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Clarett Thunderbolt Probe").font(.title)
-                Text(Bundle.main.object(forInfoDictionaryKey: "ClarettProbeMode") as? String == "audio"
-                    ? "Experimental audio driver: 48 kHz, 4 playback channels and 14 capture channels. Select it in your audio app to start streaming."
-                    : "This prototype tests driver activation and device identification. It does not provide audio.")
-                Text("Build mode: \(Bundle.main.object(forInfoDictionaryKey: "ClarettProbeMode") as? String ?? "unknown") · version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown")")
-                HStack {
-                    Button("Activate Driver") { controller.activate() }
-                    Button("Deactivate Driver") { controller.deactivate() }
-                    Button("Refresh Status") { controller.refresh() }
-                }.disabled(controller.pending)
-                Text(controller.message).textSelection(.enabled)
-                Text(controller.summary).textSelection(.enabled)
-                if Bundle.main.object(forInfoDictionaryKey: "ClarettProbeMode") as? String == "audio" {
-                    GroupBox("Software audio buffer") {
-                        HStack {
-                            Picker("Frames", selection: $controller.selectedBuffer) {
-                                ForEach(controller.bufferOptions, id: \.self) { frames in
-                                    Text("\(frames)").tag(frames)
-                                }
-                            }.frame(width: 180)
-                            Button("Set Buffer") { controller.applyBuffer() }
-                            Text("Active: \(controller.actualBuffer) frames")
-                        }.disabled(!controller.audioDeviceAvailable || controller.pending)
-                    }
-                    GroupBox("Hardware direct monitoring") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Picker("Input", selection: $controller.monitorInput) {
-                                    Text("Input 1 (mono)").tag(UInt32(1))
-                                    Text("Input 2 (mono)").tag(UInt32(2))
-                                    Text("Inputs 1–2 (stereo)").tag(UInt32(3))
-                                }
-                                Picker("Output", selection: $controller.monitorOutput) {
-                                    Text("Outputs 1–2").tag(UInt32(1))
-                                    Text("Outputs 3–4 / headphones").tag(UInt32(2))
-                                    Text("Both output pairs").tag(UInt32(3))
-                                }
-                            }
-                            Text("Live input \(Int(controller.monitorBlend))% / Computer \(100 - Int(controller.monitorBlend))%")
-                            Slider(value: $controller.monitorBlend, in: 0...100, step: 1)
-                            HStack {
-                                Button("Enable / Update Monitor") { controller.applyMonitor(enabled: true) }
-                                Button("Disable Monitor") { controller.applyMonitor(enabled: false) }
-                            }
-                            Text(controller.monitorMessage).textSelection(.enabled)
-                            Text("Turn off software input monitoring in your recording app when using this hardware mix.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }.disabled(!controller.monitorAvailable || controller.monitorBusy || controller.pending)
-                    }
-                    GroupBox("Driver safety margin") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Picker("Frames", selection: $controller.selectedSafety) {
-                                    Text("512 — stable baseline").tag(UInt32(512))
-                                    Text("256 — experimental").tag(UInt32(256))
-                                    Text("128 — experimental").tag(UInt32(128))
-                                }.frame(width: 300)
-                                Button("Apply Margin") { controller.applyTiming() }
-                                Text("Active: \(controller.actualSafety) frames")
-                            }.disabled(!controller.timingAvailable || controller.timingBusy || controller.pending)
-                            Text(controller.timingMessage).textSelection(.enabled)
-                            Text("Smaller margins reduce delay but may crackle. Applying briefly restarts audio; return to 512 if needed.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                DisclosureGroup("Diagnostics") {
-                    ScrollView {
-                        Text(controller.deviceStatus)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }.frame(height: 180)
-                }
-                Text("Full Security and SIP should remain enabled. Approval of this system extension may be requested by macOS.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .padding(24).frame(minWidth: 650, minHeight: 440)
-            }
-            .frame(minWidth: 650, minHeight: 650)
-            .onAppear { controller.refresh() }
-        }
-    }
-}
-
-final class ProbeController: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
-    static let identifier = "org.codaco.ClarettProbe.driver"
-    @Published var message = "Ready. Activate the driver to begin."
+final class BridgeController: NSObject, ObservableObject, OSSystemExtensionRequestDelegate {
+    static let identifier = Bundle.main.object(forInfoDictionaryKey: "ClarettDriverIdentifier") as? String ?? "org.codaco.ClarettProbe.driver"
+    @Published var message = "Choose Driver Setup to install or manage the driver."
     @Published var deviceStatus = "No driver service detected."
     @Published var pending = false
     @Published var summary = "Waiting for the driver."
     @Published var audioDeviceAvailable = false
-    @Published var selectedBuffer: UInt32 = 128
+    @Published var selectedBuffer: UInt32 = 512
     @Published var actualBuffer: UInt32 = 0
     @Published var bufferOptions: [UInt32] = [64, 128, 256, 512, 1024, 2048]
     @Published var monitorAvailable = false
@@ -118,16 +26,40 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
     @Published var timingAvailable = false
     @Published var timingBusy = false
     @Published var timingMessage = "Adjustable driver margin requires version 12."
+    @Published var attached = false
+    @Published var streaming = false
+    @Published var monitorEnabled = false
+    @Published var monitorUncertain = false
+    @Published var sampleRate: Double = 0
+    @Published var hardwarePeriod: UInt32 = 0
+    @Published var hardwareOverruns: UInt64 = 0
+    @Published var bufferMessage = "Choose a requested buffer, then check the active value."
+    private var lastMonitorConfiguration = ""
+    private var lastSafety: UInt32 = 0
     private var audioDevice: AudioDeviceID = 0
     private static let monitorSelector: AudioObjectPropertySelector = 0x636c6d63
     private static let timingSelector: AudioObjectPropertySelector = 0x636c7470
     private var timer: Timer?
 
-    override init() {
+    override convenience init() { self.init(preview: false) }
+    init(preview: Bool) {
         super.init()
+        if preview {
+            attached = true; streaming = true; audioDeviceAvailable = true
+            monitorAvailable = true; timingAvailable = true
+            sampleRate = 48000; actualBuffer = 512; selectedBuffer = 128
+            actualSafety = 256; selectedSafety = 256; hardwarePeriod = 128
+            summary = "Audio streaming at 48 kHz."
+            message = "Driver is available."
+            monitorMessage = "Hardware monitoring is off."
+            timingMessage = "256-frame driver margin is active."
+            deviceStatus = "ClarettProbeStatus: audio-streaming\nClarettAudioSampleRate: 48000\nClarettAudioSafetyFrames: 256\nClarettAudioPeriodFrames: 128\nClarettAudioOverruns: 0"
+            return
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+        refresh()
     }
     func activate() {
         pending = true
@@ -145,7 +77,7 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
     }
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         // This is a pending request, not proof of activation or device attachment.
-        message = "macOS requires your approval of Clarett Probe. Complete the system prompt or the extension approval in System Settings."
+        message = "macOS requires your approval of Clarett Bridge. Complete the system prompt or the extension approval in System Settings."
     }
     func request(_ request: OSSystemExtensionRequest, actionForReplacingExtension existing: OSSystemExtensionProperties,
                  withExtension replacement: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction {
@@ -188,11 +120,23 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
     private func refreshAudioSettings() {
         audioDevice = findAudioDevice()
         audioDeviceAvailable = audioDevice != 0
-        guard audioDeviceAvailable else { monitorAvailable = false; timingAvailable = false; return }
+        if audioDeviceAvailable {
+            var alive: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            var property = address(kAudioDevicePropertyDeviceIsAlive)
+            audioDeviceAvailable = AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &alive) == noErr && alive != 0
+        }
+        guard audioDeviceAvailable else { monitorAvailable = false; timingAvailable = false; actualBuffer = 0; actualSafety = 0; sampleRate = 0; return }
         var property = address(kAudioDevicePropertyBufferFrameSize)
         var frames: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
-        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &frames) == noErr { actualBuffer = frames }
+        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &frames) == noErr {
+            if actualBuffer == 0 { selectedBuffer = frames }
+            actualBuffer = frames
+        }
+        property = address(kAudioDevicePropertyNominalSampleRate)
+        var rate: Double = 0; size = UInt32(MemoryLayout<Double>.size)
+        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &rate) == noErr { sampleRate = rate }
         var range = AudioValueRange()
         size = UInt32(MemoryLayout<AudioValueRange>.size)
         property = address(kAudioDevicePropertyBufferFrameSizeRange)
@@ -207,7 +151,10 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
         property = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertySafetyOffset, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
         var safety: UInt32 = 0
         size = UInt32(MemoryLayout<UInt32>.size)
-        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &safety) == noErr { actualSafety = safety }
+        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &safety) == noErr {
+            actualSafety = safety
+            if safety != lastSafety { selectedSafety = [256, 512].contains(safety) ? safety : 256; lastSafety = safety }
+        }
     }
     func applyTiming() {
         audioDevice = findAudioDevice()
@@ -228,8 +175,9 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
         var property = address(kAudioDevicePropertyBufferFrameSize)
         let status = AudioObjectSetPropertyData(audioDevice, &property, 0, nil, UInt32(MemoryLayout<UInt32>.size), &requested)
         refreshAudioSettings()
-        message = status == noErr ? "Core Audio buffer is \(actualBuffer) frames. Audio apps may select their own buffer when they open the device."
-                                 : "Could not change the audio buffer (\(status)). Stop audio in other apps and try again."
+        if status != noErr { bufferMessage = "Could not change the buffer (\(status)). Stop audio in other apps and try again." }
+        else if actualBuffer == requested { bufferMessage = "Applied \(actualBuffer) frames. Audio apps can change this when they open the device." }
+        else { bufferMessage = "Requested \(requested) frames; Core Audio is using \(actualBuffer). A running audio app may choose its own buffer." }
     }
     func applyMonitor(enabled: Bool) {
         audioDevice = findAudioDevice()
@@ -256,12 +204,27 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
         }
         defer { IOObjectRelease(iterator) }
         var reports: [String] = []
+        attached = false; streaming = false; monitorEnabled = false; monitorUncertain = false
         while case let entry = IOIteratorNext(iterator), entry != 0 {
             defer { IOObjectRelease(entry) }
             var unmanaged: Unmanaged<CFMutableDictionary>?
             guard IORegistryEntryCreateCFProperties(entry, &unmanaged, kCFAllocatorDefault, 0) == KERN_SUCCESS,
                   let properties = unmanaged?.takeRetainedValue() as? [String: Any] else { continue }
             let state = properties["ClarettProbeStatus"] as? String ?? "unknown"
+            attached = true; streaming = state == "audio-streaming"
+            monitorEnabled = (properties["ClarettMonitorEnabled"] as? NSNumber)?.boolValue ?? false
+            monitorUncertain = (properties["ClarettMonitorUncertain"] as? NSNumber)?.boolValue ?? false
+            hardwarePeriod = (properties["ClarettAudioPeriodFrames"] as? NSNumber)?.uint32Value ?? 0
+            hardwareOverruns = (properties["ClarettAudioOverruns"] as? NSNumber)?.uint64Value ?? 0
+            if monitorEnabled {
+                let input = (properties["ClarettMonitorInputMode"] as? NSNumber)?.uint32Value ?? 1
+                let output = (properties["ClarettMonitorOutputPair"] as? NSNumber)?.uint32Value ?? 2
+                let blend = (properties["ClarettMonitorBlend"] as? NSNumber)?.doubleValue ?? 50
+                let signature = "\(input)/\(output)/\(blend)"
+                if signature != lastMonitorConfiguration {
+                    monitorInput = input; monitorOutput = output; monitorBlend = blend; lastMonitorConfiguration = signature
+                }
+            }
             summary = state == "audio-device-ready" ? "Audio ready at 48 kHz." : state == "audio-streaming" ? "Audio streaming at 48 kHz." : "Driver status: \(state)"
             monitorBusy = (properties["ClarettControlPending"] as? NSNumber)?.boolValue ?? false
             timingBusy = (properties["ClarettTimingPending"] as? NSNumber)?.boolValue ?? false
@@ -282,10 +245,10 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
             }
             reports.append(lines.joined(separator: "\n"))
         }
-        if reports.isEmpty { summary = "No Clarett driver service is attached." }
+        if reports.isEmpty { summary = "Connect and power on your Clarett, or open Driver Setup."; monitorBusy = false; timingBusy = false; hardwarePeriod = 0; hardwareOverruns = 0; monitorMessage = "Connect your Clarett to use direct monitoring." }
         refreshAudioSettings()
         deviceStatus = reports.isEmpty
-            ? "No ClarettProbe service. Activation, device connection, and PCI attachment are separate checks."
+            ? "No Clarett driver service. Activation, device connection, and PCI attachment are separate checks."
             : reports.joined(separator: "\n\n")
     }
 }

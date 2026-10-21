@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 cd "${0:A:h:h}"
-mode=${1:-attach}
+mode=${1:-audio}
 if [[ "$mode" != attach && "$mode" != mailbox && "$mode" != audio ]]; then
   print -u2 'Usage: scripts/build.sh [attach|mailbox|audio] [additional xcodebuild arguments]'
   exit 2
@@ -15,4 +15,4 @@ python3 scripts/generate-project.py "$mode"
 xcodebuild -project ClarettProbe.xcodeproj -scheme ClarettProbe \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "build/$mode" CLARETT_PROBE_MODE="$mode" \
-  CURRENT_PROJECT_VERSION="$version" "$@" build
+  CLARETT_DRIVER_VERSION="$version" CLARETT_HOST_VERSION="${CLARETT_HOST_VERSION:-13}" "$@" build

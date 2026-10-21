@@ -1,0 +1,38 @@
+# Using Clarett Bridge
+
+## Overview
+
+The overview shows the detected Core Audio sample rate, transport channel counts and active buffer. “Streaming” means an audio client has opened the engine, not that a listening test has passed. The app does not generate a tone, start a recording or change your default audio device.
+
+Select **Clarett 2Pre Thunderbolt (Experimental)** in the recording or playback application. The current format is 48 kHz, 32-bit signed interleaved PCM carrying 24-bit hardware samples. The 14 input and 4 output transport channels include digital/routing slots; they do not mean fourteen analogue sockets.
+
+## Hardware direct monitoring
+
+In Monitoring, choose input 1 centered, input 2 centered, or stereo inputs 1/2. Choose outputs 1/2, outputs 3/4 (headphone path), or both output pairs. The blend sets complementary live-input and computer gains. Click Enable monitoring or Apply mix to submit the change. The slider does not write hardware continuously.
+
+The status shows the driver’s verified applied result. An accepted request alone is not enough. The original route and mixer state is read before enable and restored/read back on disable. Settings are volatile; they are not saved to device flash. Input gain and phantom power are not controlled by this app.
+
+Turn off your recording app’s software input monitoring when using this path. Otherwise you may hear two copies at different delays. Disable direct monitoring and wait for restoration before disconnecting the device: unplugging can prevent the old driver from restoring its in-memory snapshot.
+
+## Software monitoring and effects
+
+Turn direct monitoring off, select the Clarett for input/output in the audio app and enable its monitoring. GarageBand passed a manual test with a 256-frame driver margin and an effective 512-frame Core Audio buffer. Specific plug-ins and numerical round-trip latency were not separately measured.
+
+In Audio Settings, Driver responsiveness offers:
+
+- **256 frames — Tested:** the lower margin that passed clear, acceptably responsive GarageBand monitoring.
+- **512 frames — More headroom:** the conservative default.
+
+Changing the margin briefly restarts existing audio through Core Audio’s configuration-change mechanism. It resets to 512 when the driver reattaches. Margins of 64/128 frames produced crackling, so the normal interface does not offer them. The research command-line API retains 128 for diagnosis.
+
+The Audio app buffer control is a **request** to Core Audio. Check the active value shown separately. A running audio app can choose another value. The tested setup continued to report 512 even after a 128-frame request; that is not a validated 128-frame buffer test.
+
+Audacity 4.0.1 software playthrough uses a separate high input-latency hint, observed as 100 ms on the test Mac, rather than its ordinary buffer preference. Reducing that preference to 10 ms did not make its monitoring sufficiently responsive. See [monitoring details](monitoring-controls.md).
+
+## Diagnostics and driver setup
+
+Diagnostics provides the current report, an explicit refresh and Copy report. Counters indicate driver activity, not audible integrity. The app distinguishes connection/readiness from the result of an activation request.
+
+Driver Setup activates or deactivates the installed extension using the normal macOS flow. It does not change startup security, SIP or device-management policy. If activation fails, retain the exact domain/code shown and consult [troubleshooting](troubleshooting.md).
+
+For removal, use Deactivate driver and follow any macOS restart instruction. Do not run `systemextensionsctl reset`, which affects unrelated extensions.
