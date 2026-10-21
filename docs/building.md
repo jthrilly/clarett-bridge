@@ -11,7 +11,7 @@ The SwiftUI host targets macOS 14; the driver currently targets macOS 27. Earlie
 
 ## Identifiers and capabilities
 
-The default identifiers remain `org.codaco.ClarettProbe` and `org.codaco.ClarettProbe.driver` so an existing development installation keeps working. They are not identifiers that other developer accounts can assume they own.
+The checked-in bundle identifiers support the original development installation. Other developer teams must register and use identifiers they control.
 
 Choose a reverse-DNS prefix you control when registering a new app/driver pair:
 

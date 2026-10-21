@@ -7,8 +7,9 @@ Check power and the complete Thunderbolt chain. This project supports the origin
 ```sh
 systemextensionsctl list
 zsh scripts/audio-status.sh
-ioreg -r -n ClarettProbe -l -w0
 ```
+
+Use **Diagnostics → Copy report** in Clarett Bridge for the full driver-property report.
 
 If a new driver is activated while the old version owns the device, stop audio, disable hardware monitoring and wait for restoration, then reconnect the powered device. A failed mailbox session can require a cold power cycle. Do not repeatedly submit commands to a poisoned session.
 

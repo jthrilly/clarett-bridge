@@ -39,10 +39,11 @@ Focusrite Control compatibility is not implemented; use Core Audio applications 
 
 ```sh
 scripts/audio-status.sh
-ioreg -r -n ClarettProbe -l -w0
 systemextensionsctl list
 csrutil status
 ```
+
+Use **Diagnostics → Copy report** in Clarett Bridge for the full driver-property report.
 
 `audio-status.sh` only enumerates Core Audio properties. It never starts I/O, changes the default device, plays a tone or records. Driver properties expose the current status, hardware frames/events/overruns, HAL read/write callback counts and nonzero sample counts. Nonzero samples alone do not prove correct routing or intelligible audio.
 

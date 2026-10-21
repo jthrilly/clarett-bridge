@@ -63,7 +63,7 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
             message = "Driver is available."
             monitorMessage = "Hardware monitoring is off."
             timingMessage = "256-frame driver margin is active."
-            deviceStatus = "ClarettProbeStatus: audio-streaming\nClarettAudioSampleRate: 48000\nClarettAudioSafetyFrames: 256\nClarettAudioPeriodFrames: 128\nClarettAudioOverruns: 0"
+            deviceStatus = "ClarettAudioRingFrames: 4096\nClarettAudioSampleRate: 48000\nClarettAudioSafetyFrames: 256\nClarettAudioPeriodFrames: 128\nClarettAudioOverruns: 0"
             return
         }
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in

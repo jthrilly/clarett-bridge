@@ -45,7 +45,7 @@ python3 scripts/verify-signing.py 'build/audio/Build/Products/Debug/Clarett Brid
 
 New developers must register their own bundle identifiers and capabilities; see the [complete build and signing guide](docs/building.md). Install the verified app in `/Applications`, open **Driver Setup → Activate driver**, and complete the normal macOS approval flow. Keep Full Security and SIP enabled. Device-management approval policy may differ on other Macs.
 
-The app is now named **Clarett Bridge**. Existing driver identifiers and device identity retain the earlier `ClarettProbe` name for installation compatibility. The Xcode project and scheme are still named `ClarettProbe`. Host build 14 (0.2.0) can operate the existing version 12 audio driver, but changing sample rate requires activating audio driver version 13. Driver version 12 remains the previous audio-tested baseline.
+Host build 14 (0.2.0) can operate the existing version 12 audio driver, but changing sample rate requires activating audio driver version 13. Driver version 12 remains the previous audio-tested baseline.
 
 ## Use it
 
