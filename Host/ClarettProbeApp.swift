@@ -11,7 +11,9 @@ struct ClarettProbeApp: App {
         WindowGroup("Clarett Probe") {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Clarett Thunderbolt Probe").font(.title)
-                Text("This prototype tests driver activation and device identification. It does not provide audio.")
+                Text(Bundle.main.object(forInfoDictionaryKey: "ClarettProbeMode") as? String == "audio"
+                    ? "Experimental audio driver: 48 kHz, 4 playback channels and 14 capture channels. Select it in your audio app to start streaming."
+                    : "This prototype tests driver activation and device identification. It does not provide audio.")
                 Text("Build mode: \(Bundle.main.object(forInfoDictionaryKey: "ClarettProbeMode") as? String ?? "unknown")")
                 HStack {
                     Button("Activate Driver") { controller.activate() }

@@ -11,21 +11,27 @@
 			"sourceTree" = "<group>";
 			"lastKnownFileType" = "sourcecode.swift";
 		};
-		"23F99D071B1D0114914978E3" = {
+		"E658FC710EA827A43282EB69" = {
 			"isa" = "PBXFileReference";
-			"path" = "Driver/ClarettProbe.cpp";
+			"path" = "Driver/ClarettAudio.cpp";
 			"sourceTree" = "<group>";
 			"lastKnownFileType" = "sourcecode.cpp.cpp";
 		};
-		"1B862ACDED936F24067C15C3" = {
+		"47A6A19F3B850486D36541EF" = {
 			"isa" = "PBXFileReference";
-			"path" = "Driver/ClarettProbe.iig";
+			"path" = "Driver/ClarettAudio.iig";
 			"sourceTree" = "<group>";
 			"lastKnownFileType" = "sourcecode.iig";
 		};
 		"99AEC187CDFF6576A79A0BB3" = {
 			"isa" = "PBXFileReference";
 			"path" = "Shared/Protocol.hpp";
+			"sourceTree" = "<group>";
+			"lastKnownFileType" = "sourcecode.cpp.h";
+		};
+		"9C224AA206C0068A5F1C335D" = {
+			"isa" = "PBXFileReference";
+			"path" = "Shared/AudioRing.hpp";
 			"sourceTree" = "<group>";
 			"lastKnownFileType" = "sourcecode.cpp.h";
 		};
@@ -73,7 +79,7 @@
 		};
 		"0D6E4079E36703EBD37C0072" = {
 			"isa" = "PBXGroup";
-			"children" = ("DA2D5429327771AED937EC2B", "23F99D071B1D0114914978E3", "1B862ACDED936F24067C15C3", "99AEC187CDFF6576A79A0BB3", "46C3D3A01FCB4779A7A5A2E8", "0275188D6063AC8E52C01DC1", "3FC533E11147C4079FD541D4", "4690360325FD8CD02F1B766F", "0A3E27B8CA818264D75C8D81");
+			"children" = ("DA2D5429327771AED937EC2B", "E658FC710EA827A43282EB69", "47A6A19F3B850486D36541EF", "99AEC187CDFF6576A79A0BB3", "9C224AA206C0068A5F1C335D", "46C3D3A01FCB4779A7A5A2E8", "0275188D6063AC8E52C01DC1", "3FC533E11147C4079FD541D4", "4690360325FD8CD02F1B766F", "0A3E27B8CA818264D75C8D81");
 			"sourceTree" = "<group>";
 		};
 		"433548979C024CC63B5F3B8D" = {
@@ -90,8 +96,8 @@
 				"CODE_SIGN_STYLE" = "Automatic";
 				"DEVELOPMENT_TEAM" = "85EZ69PQHJ";
 				"CODE_SIGN_IDENTITY" = "Apple Development";
-				"CLARETT_PROBE_MODE" = "attach";
-				"CURRENT_PROJECT_VERSION" = "1";
+				"CLARETT_PROBE_MODE" = "audio";
+				"CURRENT_PROJECT_VERSION" = "6";
 				"GCC_OPTIMIZATION_LEVEL" = "0";
 				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
 				"DEBUG_INFORMATION_FORMAT" = "dwarf";
@@ -111,8 +117,8 @@
 				"CODE_SIGN_STYLE" = "Automatic";
 				"DEVELOPMENT_TEAM" = "85EZ69PQHJ";
 				"CODE_SIGN_IDENTITY" = "Apple Development";
-				"CLARETT_PROBE_MODE" = "attach";
-				"CURRENT_PROJECT_VERSION" = "1";
+				"CLARETT_PROBE_MODE" = "audio";
+				"CURRENT_PROJECT_VERSION" = "6";
 				"GCC_OPTIMIZATION_LEVEL" = "s";
 				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
 			};
@@ -125,11 +131,11 @@
 		};
 		"ABE05AAA72632BCED1D708A7" = {
 			"isa" = "PBXBuildFile";
-			"fileRef" = "23F99D071B1D0114914978E3";
+			"fileRef" = "E658FC710EA827A43282EB69";
 		};
 		"C273C39BF4C6220F33DE3B92" = {
 			"isa" = "PBXBuildFile";
-			"fileRef" = "1B862ACDED936F24067C15C3";
+			"fileRef" = "47A6A19F3B850486D36541EF";
 		};
 		"804BFAD27E743D46D7F99824" = {
 			"isa" = "PBXSourcesBuildPhase";
@@ -168,7 +174,7 @@
 				"CODE_SIGN_ENTITLEMENTS" = "Driver/ClarettProbe.entitlements";
 				"SKIP_INSTALL" = "YES";
 				"HEADER_SEARCH_PATHS" = "$(SRCROOT)/Shared";
-				"OTHER_LDFLAGS" = ("-framework", "DriverKit", "-framework", "PCIDriverKit");
+				"OTHER_LDFLAGS" = ("-framework", "DriverKit", "-framework", "PCIDriverKit", "-framework", "AudioDriverKit");
 				"GCC_ENABLE_CPP_EXCEPTIONS" = "NO";
 				"GCC_ENABLE_CPP_RTTI" = "NO";
 				"ENABLE_APP_SANDBOX" = "YES";
@@ -190,7 +196,7 @@
 				"CODE_SIGN_ENTITLEMENTS" = "Driver/ClarettProbe.entitlements";
 				"SKIP_INSTALL" = "YES";
 				"HEADER_SEARCH_PATHS" = "$(SRCROOT)/Shared";
-				"OTHER_LDFLAGS" = ("-framework", "DriverKit", "-framework", "PCIDriverKit");
+				"OTHER_LDFLAGS" = ("-framework", "DriverKit", "-framework", "PCIDriverKit", "-framework", "AudioDriverKit");
 				"GCC_ENABLE_CPP_EXCEPTIONS" = "NO";
 				"GCC_ENABLE_CPP_RTTI" = "NO";
 				"ENABLE_APP_SANDBOX" = "YES";

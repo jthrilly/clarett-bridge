@@ -34,7 +34,21 @@ inline Request firmwareInfo(uint16_t sequence) {
     // GET_DATA offset 8, length 8: application/FPGA identification words only.
     return { GetData, sequence, 8, 8, { 8, 0, 0, 0, 8, 0, 0, 0 } };
 }
-inline bool permitted(const Request &r) {
+inline Request audioClock(uint16_t sequence) {
+    return { 0x006003, sequence, 8, 0, { 0x80, 0xbb, 0, 0, 24, 0, 0, 0 } }; // 48 kHz, internal
+}
+inline Request audioSync(uint32_t opcode, uint16_t sequence) {
+    return { opcode, sequence, 0, uint16_t(opcode == 0x006002 ? 0 : 4), {} };
+}
+inline bool permitted(const Request &r, bool audio = false) {
+    if (audio) {
+        const auto clock = audioClock(r.sequence);
+        bool same = r.opcode == clock.opcode && r.length == clock.length && r.expectedLength == 0;
+        for (size_t i = 0; i < 8; ++i) same &= r.payload[i] == clock.payload[i];
+        if (same) return true;
+        if ((r.opcode == 0x006004 || r.opcode == 0x006002 || r.opcode == 0x006005) &&
+            r.length == 0 && r.expectedLength == (r.opcode == 0x006002 ? 0 : 4)) return true;
+    }
     if (r.opcode == StreamInfo && r.length == 1 && r.expectedLength == 4 && r.payload[0] == 0)
         return true;
     const auto f = firmwareInfo(r.sequence);
@@ -58,7 +72,7 @@ inline Response validate(const Request &r, const volatile uint8_t *buffer,
     // test 2Pre). Consume only its four-byte geometry prefix. GET_DATA must
     // return exactly the requested eight identification bytes.
     if (length < r.expectedLength || length > capacity - HeaderSize ||
-        (r.opcode != StreamInfo && length != r.expectedLength))
+        (r.opcode == GetData && length != r.expectedLength))
         return Response::InvalidLength;
     return Response::Complete;
 }
@@ -75,8 +89,8 @@ enum class Result { Success, NotPermitted, Disconnected, Timeout, BadResponse, P
 
 class Session {
 public:
-    Session(Transport &transport, volatile uint8_t *response, size_t capacity)
-        : io(transport), buffer(response), size(capacity) {}
+    Session(Transport &transport, volatile uint8_t *response, size_t capacity, bool audio = false)
+        : io(transport), buffer(response), size(capacity), allowAudio(audio) {}
 
     Response lastResponse() const { return responseState; }
     uint32_t observedPhase() const { return phaseBits; }
@@ -84,7 +98,7 @@ public:
 
     Result transact(const Request &r) {
         if (poisoned) return Result::Poisoned;
-        if (!permitted(r) || size < HeaderSize + r.expectedLength) return Result::NotPermitted;
+        if (!permitted(r, allowAudio) || size < HeaderSize + r.expectedLength) return Result::NotPermitted;
         responseState = Response::Pending;
         phaseBits = causeBits = 0;
         // Volatile stores are intentional: memory is shared with PCI DMA.
@@ -132,6 +146,7 @@ private:
     volatile uint8_t *buffer;
     size_t size;
     bool poisoned = false;
+    bool allowAudio = false;
     Response responseState = Response::Pending;
     uint32_t phaseBits = 0, causeBits = 0;
 };

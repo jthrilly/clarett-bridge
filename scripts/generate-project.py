@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Generate a dependency-free Xcode project; no signing secrets are stored here."""
+import sys
 import hashlib
 import plistlib
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parents[1]
+AUDIO = len(sys.argv) > 1 and sys.argv[1] == "audio"
+CLASS = "ClarettAudio" if AUDIO else "ClarettProbe"
 objects = {}
 
 def ident(name):
@@ -32,7 +35,8 @@ plist('Driver/Info.plist', {
         'CFBundleIdentifierKernel': 'com.apple.kpi.iokit',
         'IOClass': 'IOUserService',
         'IOProviderClass': 'IOPCIDevice',
-        'IOUserClass': 'ClarettProbe',
+        'IOUserClass': CLASS,
+        **({'IOUserAudioDriverUserClientProperties': {'IOClass': 'IOUserUserClient', 'IOUserClass': 'IOUserAudioDriverUserClient'}} if AUDIO else {}),
         'IOUserServerName': '$(PRODUCT_BUNDLE_IDENTIFIER)',
         'IOPCIPrimaryMatch': '0x00021cb5',
         'IOPCITunnelCompatible': True,
@@ -42,6 +46,7 @@ plist('Driver/Info.plist', {
 })
 plist('Driver/ClarettProbe.entitlements', {
     'com.apple.developer.driverkit': True,
+    **({'com.apple.developer.driverkit.family.audio': True} if AUDIO else {}),
     'com.apple.developer.driverkit.transport.pci': [{'IOPCIPrimaryMatch': '0xFFFFFFFF&0x00000000'}],
     'com.apple.security.app-sandbox': True,
 })
@@ -62,9 +67,10 @@ def file(path, kind):
     return obj(path, 'PBXFileReference', path=path, sourceTree='<group>', lastKnownFileType=kind)
 
 sources = [file('Host/ClarettProbeApp.swift', 'sourcecode.swift'),
-           file('Driver/ClarettProbe.cpp', 'sourcecode.cpp.cpp'),
-           file('Driver/ClarettProbe.iig', 'sourcecode.iig')]
+           file(f'Driver/{CLASS}.cpp', 'sourcecode.cpp.cpp'),
+           file(f'Driver/{CLASS}.iig', 'sourcecode.iig')]
 others = [file('Shared/Protocol.hpp', 'sourcecode.cpp.h'),
+          file('Shared/AudioRing.hpp', 'sourcecode.cpp.h'),
           file('Driver/Info.plist', 'text.plist.xml'),
           file('Host/Info.plist', 'text.plist.xml'),
           file('Driver/ClarettProbe.entitlements', 'text.plist.entitlements'),
@@ -80,7 +86,7 @@ common = {
     'GCC_WARN_UNDECLARED_SELECTOR': 'YES', 'GCC_WARN_UNINITIALIZED_AUTOS': 'YES_AGGRESSIVE',
     'ENABLE_USER_SCRIPT_SANDBOXING': 'YES', 'CODE_SIGN_STYLE': 'Automatic',
     'DEVELOPMENT_TEAM': '85EZ69PQHJ', 'CODE_SIGN_IDENTITY': 'Apple Development',
-    'CLARETT_PROBE_MODE': 'attach', 'CURRENT_PROJECT_VERSION': '1',
+    'CLARETT_PROBE_MODE': 'audio' if AUDIO else 'attach', 'CURRENT_PROJECT_VERSION': '6' if AUDIO else '1',
 }
 def configs(name, extra):
     entries = []
@@ -109,7 +115,7 @@ driver_configs = configs('Driver', {
     'PRODUCT_BUNDLE_IDENTIFIER': 'org.codaco.ClarettProbe.driver',
     'INFOPLIST_FILE': 'Driver/Info.plist', 'CODE_SIGN_ENTITLEMENTS': 'Driver/ClarettProbe.entitlements',
     'SKIP_INSTALL': 'YES', 'HEADER_SEARCH_PATHS': '$(SRCROOT)/Shared',
-    'OTHER_LDFLAGS': ['-framework', 'DriverKit', '-framework', 'PCIDriverKit'],
+    'OTHER_LDFLAGS': ['-framework', 'DriverKit', '-framework', 'PCIDriverKit'] + (['-framework', 'AudioDriverKit'] if AUDIO else []),
     'GCC_ENABLE_CPP_EXCEPTIONS': 'NO', 'GCC_ENABLE_CPP_RTTI': 'NO',
     'ENABLE_APP_SANDBOX': 'YES',
 })

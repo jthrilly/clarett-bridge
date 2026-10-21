@@ -16,9 +16,13 @@ def run(*args):
 hardware = json.loads(run('system_profiler', 'SPHardwareDataType', '-json'))['SPHardwareDataType'][0]
 machine_ids = [hardware.get('provisioning_UDID'), hardware.get('platform_UUID')]
 
+driver_info = plistlib.loads((driver/'Info.plist').read_bytes())
+audio = driver_info['IOKitPersonalities']['ClarettProbe']['ClarettProbeMode'] == 'audio'
+
 for bundle, required in [
     (app, {'com.apple.developer.system-extension.install': True}),
     (driver, {'com.apple.developer.driverkit': True,
+              **({'com.apple.developer.driverkit.family.audio': True} if audio else {}),
               'com.apple.developer.driverkit.transport.pci': [{'IOPCIPrimaryMatch': '0xFFFFFFFF&0x00000000'}]}),
 ]:
     run('codesign', '--verify', '--strict', '--verbose=2', str(bundle))
@@ -51,5 +55,5 @@ for bundle, required in [
 info = plistlib.loads((driver/'Info.plist').read_bytes())
 personality = info['IOKitPersonalities']['ClarettProbe']
 assert personality['IOPCIPrimaryMatch'].lower() == '0x00021cb5'
-assert personality['ClarettProbeMode'] in ['attach', 'mailbox']
+assert personality['ClarettProbeMode'] in ['attach', 'mailbox', 'audio']
 print(f'PASS: PCI match restricted to 1cb5:0002, mode {personality["ClarettProbeMode"]}')

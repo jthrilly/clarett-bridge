@@ -29,7 +29,14 @@
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
 			<key>IOUserClass</key>
-			<string>ClarettProbe</string>
+			<string>ClarettAudio</string>
+			<key>IOUserAudioDriverUserClientProperties</key>
+			<dict>
+				<key>IOClass</key>
+				<string>IOUserUserClient</string>
+				<key>IOUserClass</key>
+				<string>IOUserAudioDriverUserClient</string>
+			</dict>
 			<key>IOUserServerName</key>
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>IOPCIPrimaryMatch</key>

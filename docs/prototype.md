@@ -37,3 +37,7 @@ The response address is cleared during cleanup while the allocation remains mapp
 7. Six identification transactions complete with consistent 2Pre geometry and firmware words.
 
 Build success alone is not hardware success. Any pending user approval, reboot requirement, signing failure or policy denial must remain explicit in the recorded result.
+
+## Audio stage
+
+The separate audio build now subclasses IOUserAudioDriver and exposes a fixed 48 kHz duplex device. It retains the PCI/mailbox session, maps a separate audio DMA ring and adds a fixed internal-clock handshake. Audio buffers and callbacks are separate from mailbox protocol handling. See [audio streaming](audio-streaming.md) for the implementation, current hardware evidence, timestamp correction, manual test and remaining limitations.
