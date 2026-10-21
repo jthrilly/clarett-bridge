@@ -6,7 +6,7 @@ using namespace AudioDriverKit;
 class ClarettAudio;
 class ClarettSettings : public IOUserAudioCustomProperty {
 public:
-    bool Configure(ClarettAudio *owner) LOCALONLY;
+    bool Configure(ClarettAudio *owner, bool timing = false) LOCALONLY;
     virtual void free() override LOCALONLY;
     virtual kern_return_t HandleChangeCustomPropertyDataValueWithQualifier(OSObject *qualifier, OSObject *data) override LOCALONLY;
 };

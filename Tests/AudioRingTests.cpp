@@ -30,6 +30,21 @@ int main() {
         assert((rx & 4095) + A::FragmentFrames * A::RxChannels * 4 - (rx & 3) <= 4096);
     }
     for (unsigned i = 0; i < 16; ++i) assert(memory[A::Bytes+i] == 0xa5);
+    for (auto safety : {128u, 256u, 512u}) {
+        assert(A::safetyValid(safety));
+        const auto period = A::periodForSafety(safety);
+        assert(A::build(memory.data(), A::Bytes, base, period));
+        unsigned markers = 0;
+        for (unsigned i = 0; i < A::Descriptors; ++i) {
+            const auto descriptor = load64(memory.data() + A::RxTable + i * 8);
+            assert(bool(descriptor & 2) == ((i + 1) % (period / A::FragmentFrames) == 0));
+            markers += (descriptor & 2) != 0;
+        }
+        assert(markers == A::Frames / period);
+    }
+    for (auto bad : {0u, 1u, 15u, 17u, 48u, 8192u})
+        assert(!A::build(memory.data(), A::Bytes, base, bad));
+    for (auto bad : {0ull, 64ull, 129ull, 1024ull, 0x100000080ull}) assert(!A::safetyValid(bad));
     // Packed HAL frames are scattered over 14-channel fragments with padding.
     for (uint64_t f = 0; f < 2 * A::Frames; ++f) {
         for (uint32_t ch = 0; ch < A::RxChannels; ++ch) {

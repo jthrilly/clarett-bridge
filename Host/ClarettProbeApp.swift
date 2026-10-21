@@ -10,6 +10,7 @@ struct ClarettProbeApp: App {
     @StateObject private var controller = ProbeController()
     var body: some Scene {
         WindowGroup("Clarett Probe") {
+            ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Clarett Thunderbolt Probe").font(.title)
                 Text(Bundle.main.object(forInfoDictionaryKey: "ClarettProbeMode") as? String == "audio"
@@ -60,6 +61,22 @@ struct ClarettProbeApp: App {
                                 .font(.caption).foregroundStyle(.secondary)
                         }.disabled(!controller.monitorAvailable || controller.monitorBusy || controller.pending)
                     }
+                    GroupBox("Driver safety margin") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Picker("Frames", selection: $controller.selectedSafety) {
+                                    Text("512 — stable baseline").tag(UInt32(512))
+                                    Text("256 — experimental").tag(UInt32(256))
+                                    Text("128 — experimental").tag(UInt32(128))
+                                }.frame(width: 300)
+                                Button("Apply Margin") { controller.applyTiming() }
+                                Text("Active: \(controller.actualSafety) frames")
+                            }.disabled(!controller.timingAvailable || controller.timingBusy || controller.pending)
+                            Text(controller.timingMessage).textSelection(.enabled)
+                            Text("Smaller margins reduce delay but may crackle. Applying briefly restarts audio; return to 512 if needed.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 DisclosureGroup("Diagnostics") {
                     ScrollView {
@@ -73,6 +90,8 @@ struct ClarettProbeApp: App {
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(24).frame(minWidth: 650, minHeight: 440)
+            }
+            .frame(minWidth: 650, minHeight: 650)
             .onAppear { controller.refresh() }
         }
     }
@@ -94,8 +113,14 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
     @Published var monitorBlend: Double = 50
     @Published var monitorBusy = false
     @Published var monitorMessage = "Hardware monitor controls require the updated audio driver."
+    @Published var selectedSafety: UInt32 = 512
+    @Published var actualSafety: UInt32 = 0
+    @Published var timingAvailable = false
+    @Published var timingBusy = false
+    @Published var timingMessage = "Adjustable driver margin requires version 12."
     private var audioDevice: AudioDeviceID = 0
     private static let monitorSelector: AudioObjectPropertySelector = 0x636c6d63
+    private static let timingSelector: AudioObjectPropertySelector = 0x636c7470
     private var timer: Timer?
 
     override init() {
@@ -163,7 +188,7 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
     private func refreshAudioSettings() {
         audioDevice = findAudioDevice()
         audioDeviceAvailable = audioDevice != 0
-        guard audioDeviceAvailable else { monitorAvailable = false; return }
+        guard audioDeviceAvailable else { monitorAvailable = false; timingAvailable = false; return }
         var property = address(kAudioDevicePropertyBufferFrameSize)
         var frames: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
@@ -177,6 +202,24 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
         }
         property = address(Self.monitorSelector)
         monitorAvailable = AudioObjectHasProperty(audioDevice, &property)
+        property = address(Self.timingSelector)
+        timingAvailable = AudioObjectHasProperty(audioDevice, &property)
+        property = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertySafetyOffset, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+        var safety: UInt32 = 0
+        size = UInt32(MemoryLayout<UInt32>.size)
+        if AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &safety) == noErr { actualSafety = safety }
+    }
+    func applyTiming() {
+        audioDevice = findAudioDevice()
+        guard audioDevice != 0 else { timingMessage = "The Clarett audio device is unavailable."; return }
+        var property = address(Self.timingSelector)
+        let request = ["SafetyFrames": selectedSafety] as CFDictionary
+        var reference = Unmanaged.passUnretained(request).toOpaque()
+        let status = withExtendedLifetime(request) {
+            AudioObjectSetPropertyData(audioDevice, &property, 0, nil, UInt32(MemoryLayout<UnsafeMutableRawPointer>.size), &reference)
+        }
+        timingBusy = status == noErr
+        timingMessage = status == noErr ? "Waiting for Core Audio to apply the margin…" : "Margin request failed (\(status))."
     }
     func applyBuffer() {
         audioDevice = findAudioDevice()
@@ -221,6 +264,11 @@ final class ProbeController: NSObject, ObservableObject, OSSystemExtensionReques
             let state = properties["ClarettProbeStatus"] as? String ?? "unknown"
             summary = state == "audio-device-ready" ? "Audio ready at 48 kHz." : state == "audio-streaming" ? "Audio streaming at 48 kHz." : "Driver status: \(state)"
             monitorBusy = (properties["ClarettControlPending"] as? NSNumber)?.boolValue ?? false
+            timingBusy = (properties["ClarettTimingPending"] as? NSNumber)?.boolValue ?? false
+            if let timingState = properties["ClarettTimingStatus"] as? String {
+                timingMessage = timingState == "stable" ? "Driver margin applied. Choose an app buffer separately above." :
+                    timingState == "applying" ? "Waiting for Core Audio configuration change…" : "Margin change failed. Check Diagnostics."
+            }
             if let monitorState = properties["ClarettMonitorStatus"] as? String {
                 let uncertain = (properties["ClarettMonitorUncertain"] as? NSNumber)?.boolValue ?? false
                 if uncertain { monitorMessage = "Hardware monitor state is uncertain. Check Diagnostics before continuing." }

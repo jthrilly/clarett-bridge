@@ -71,6 +71,7 @@ sources = [file('Host/ClarettProbeApp.swift', 'sourcecode.swift'),
            file(f'Driver/{CLASS}.iig', 'sourcecode.iig')]
 if AUDIO:
     sources += [file('Driver/ClarettSettings.cpp', 'sourcecode.cpp.cpp'), file('Driver/ClarettSettings.iig', 'sourcecode.iig')]
+    sources += [file('Driver/ClarettDevice.cpp', 'sourcecode.cpp.cpp'), file('Driver/ClarettDevice.iig', 'sourcecode.iig')]
 others = [file('Shared/Protocol.hpp', 'sourcecode.cpp.h'),
           file('Shared/AudioRing.hpp', 'sourcecode.cpp.h'),
           file('Shared/Monitor.hpp', 'sourcecode.cpp.h'),
@@ -89,7 +90,7 @@ common = {
     'GCC_WARN_UNDECLARED_SELECTOR': 'YES', 'GCC_WARN_UNINITIALIZED_AUTOS': 'YES_AGGRESSIVE',
     'ENABLE_USER_SCRIPT_SANDBOXING': 'YES', 'CODE_SIGN_STYLE': 'Automatic',
     'DEVELOPMENT_TEAM': '85EZ69PQHJ', 'CODE_SIGN_IDENTITY': 'Apple Development',
-    'CLARETT_PROBE_MODE': 'audio' if AUDIO else 'attach', 'CURRENT_PROJECT_VERSION': '9' if AUDIO else '1',
+    'CLARETT_PROBE_MODE': 'audio' if AUDIO else 'attach', 'CURRENT_PROJECT_VERSION': '12' if AUDIO else '1',
 }
 def configs(name, extra):
     entries = []
@@ -108,7 +109,7 @@ def phase(phase_name, isa, files=None, **extra):
 def buildfile(name, ref):
     return obj(name, 'PBXBuildFile', fileRef=ref)
 
-driver_sources = phase('driver-sources', 'PBXSourcesBuildPhase', [buildfile('driver-cpp', sources[1]), buildfile('driver-iig', sources[2])] + ([buildfile('settings-cpp', sources[3]), buildfile('settings-iig', sources[4])] if AUDIO else []))
+driver_sources = phase('driver-sources', 'PBXSourcesBuildPhase', [buildfile('driver-cpp', sources[1]), buildfile('driver-iig', sources[2])] + ([buildfile('settings-cpp', sources[3]), buildfile('settings-iig', sources[4]), buildfile('device-cpp', sources[5]), buildfile('device-iig', sources[6])] if AUDIO else []))
 driver_headers = phase('driver-headers', 'PBXHeadersBuildPhase')
 driver_frameworks = phase('driver-frameworks', 'PBXFrameworksBuildPhase')
 driver_resources = phase('driver-resources', 'PBXResourcesBuildPhase')

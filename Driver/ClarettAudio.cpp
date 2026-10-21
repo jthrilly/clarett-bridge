@@ -12,6 +12,7 @@
 #include <os/log.h>
 #include "ClarettAudio.h"
 #include "ClarettSettings.h"
+#include "ClarettDevice.h"
 #include "Protocol.hpp"
 #include "AudioRing.hpp"
 #include <AudioDriverKit/AudioDriverKit.h>
@@ -54,6 +55,8 @@ struct ClarettAudio_IVars {
     bool failed;
     IODispatchQueue *controlQueue, *periodQueue;
     ClarettSettings *settings;
+    ClarettSettings *timingSettings;
+    uint32_t safetyFrames, periodFrames, timingPending, desiredSafety;
     uint32_t mailboxBusy, closing, controlPending;
     bool monitorEnabled, monitorDirty;
     Clarett::Monitor::Plan monitor;
@@ -347,6 +350,7 @@ void ClarettAudio::ReleaseAudioObjects() {
     if (ivars->timer) ivars->timer->Cancel(nullptr);
     OSSafeReleaseNULL(ivars->timer);
     OSSafeReleaseNULL(ivars->settings);
+    OSSafeReleaseNULL(ivars->timingSettings);
     // Queues remain alive until free: an in-flight property setter may enqueue
     // a closing-only completion after Stop has drained earlier requests.
     OSSafeReleaseNULL(ivars->timerAction);
@@ -374,6 +378,8 @@ kern_return_t audioBuffer(uint64_t size, IOBufferMemoryDescriptor **descriptor, 
 
 kern_return_t ClarettAudio::ConfigureAudio() {
     Publish("configuring-audio-device");
+    ivars->safetyFrames = A::Safety;
+    ivars->periodFrames = A::Period;
     void *address = nullptr;
     auto ret = audioBuffer(A::Bytes, &ivars->audioMemory, &address);
     if (ret != kIOReturnSuccess) return ret;
@@ -403,8 +409,8 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     auto model = OSSharedPtr(OSString::withCString("Clarett2PreThunderbolt"), OSNoRetain);
     auto manufacturer = OSSharedPtr(OSString::withCString("Focusrite / experimental driver"), OSNoRetain);
     auto name = OSSharedPtr(OSString::withCString("Clarett 2Pre Thunderbolt (Experimental)"), OSNoRetain);
-    auto device = IOUserAudioDevice::Create(this, false, uid.get(), model.get(), manufacturer.get(), A::Frames);
-    if (!device) return kIOReturnNoMemory;
+    auto device = OSSharedPtr(OSTypeAlloc(ClarettDevice), OSNoRetain);
+    if (!device || !device->Configure(this, uid.get(), model.get(), manufacturer.get(), A::Frames)) return kIOReturnNoMemory;
     ivars->device = device.get(); ivars->device->retain();
     device->SetName(name.get());
     SetName(name.get());
@@ -507,7 +513,12 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     if (!ivars->settings || !ivars->settings->Configure(this)) return kIOReturnNoMemory;
     ret = device->AddCustomProperty(ivars->settings);
     if (ret != kIOReturnSuccess) return ret;
+    ivars->timingSettings = OSTypeAlloc(ClarettSettings);
+    if (!ivars->timingSettings || !ivars->timingSettings->Configure(this, true)) return kIOReturnNoMemory;
+    ret = device->AddCustomProperty(ivars->timingSettings);
+    if (ret != kIOReturnSuccess) return ret;
     MonitorStatus("off");
+    TimingStatus("stable");
     ret = AddObject(device.get());
     if (ret != kIOReturnSuccess) return ret;
     auto props = OSDictionary::withCapacity(4);
@@ -541,7 +552,7 @@ kern_return_t ClarettAudio::StartAudio() {
         const auto ret = Command(opcode);
         if (ret != kIOReturnSuccess) return ret;
     }
-    if (!A::build(ivars->audioBytes, A::Bytes, ivars->audioAddress)) return kIOReturnUnsupported;
+    if (!A::build(ivars->audioBytes, A::Bytes, ivars->audioAddress, ivars->periodFrames)) return kIOReturnUnsupported;
     memset(ivars->inputBytes, 0, A::Frames * A::RxChannels * 4);
     memset(ivars->outputBytes, 0, A::Frames * A::TxChannels * 4);
     ivars->frames = ivars->events = ivars->overruns = ivars->lastTimestamp = 0;
@@ -621,7 +632,7 @@ void IMPL(ClarettAudio, Tick) {
     const auto now = mach_absolute_time();
     const auto gap = now - ivars->lastPoll;
     if (gap > ivars->pollGapMax) ivars->pollGapMax = gap;
-    ivars->latePolls += gap > ivars->ticksPerSecond * A::Period / A::Rate;
+    ivars->latePolls += gap > ivars->ticksPerSecond * ivars->periodFrames / A::Rate;
     ivars->lastPoll = now;
     PCITransport io(ivars->pci, ivars->bar);
     uint32_t unused = 0, cause = 0;
@@ -670,7 +681,7 @@ void IMPL(ClarettAudio, Tick) {
             ivars->device->UpdateCurrentZeroTimestamp(timestampFrame, now - ticksPastBoundary);
             ivars->lastTimestamp = timestampFrame;
         }
-        if (ivars->events % (A::Rate / A::Period) == 0) {
+        if (ivars->events % (A::Rate / ivars->periodFrames) == 0) {
             auto props = OSDictionary::withCapacity(7);
             if (props) {
             number(props, "ClarettAudioCallbacks", __atomic_load_n(&ivars->callbacks, __ATOMIC_RELAXED));
@@ -890,4 +901,81 @@ kern_return_t ClarettAudio::QueueMonitorConfiguration(OSDictionary *settings) {
         release();
     });
     return kIOReturnSuccess;
+}
+
+void ClarettAudio::TimingStatus(const char *state, uint32_t error) {
+    auto props = OSDictionary::withCapacity(6);
+    auto label = OSString::withCString(state);
+    if (props && label) {
+        props->setObject("ClarettTimingStatus", label);
+        number(props, "ClarettTimingError", error);
+        number(props, "ClarettTimingPending", __atomic_load_n(&ivars->timingPending, __ATOMIC_ACQUIRE));
+        number(props, "ClarettAudioSafetyFrames", __atomic_load_n(&ivars->safetyFrames, __ATOMIC_ACQUIRE));
+        number(props, "ClarettAudioPeriodFrames", __atomic_load_n(&ivars->periodFrames, __ATOMIC_ACQUIRE));
+        SetProperties(props);
+    }
+    OSSafeReleaseNULL(label); OSSafeReleaseNULL(props);
+}
+
+kern_return_t ClarettAudio::QueueTimingConfiguration(OSDictionary *settings) {
+    if (__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) || !ivars->controlQueue) return kIOReturnNotReady;
+    if (settings->getCount() != 1) return kIOReturnBadArgument;
+    auto safety = OSDynamicCast(OSNumber, settings->getObject("SafetyFrames"));
+    if (!safety || !A::safetyValid(safety->unsigned64BitValue())) return kIOReturnBadArgument;
+    uint32_t idle = 0;
+    if (!__atomic_compare_exchange_n(&ivars->timingPending, &idle, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return kIOReturnBusy;
+    const auto requested = safety->unsigned32BitValue();
+    __atomic_store_n(&ivars->desiredSafety, requested, __ATOMIC_RELEASE);
+    retain();
+    ivars->controlQueue->DispatchAsync(^{
+        TimingStatus("applying");
+        // The host stops I/O and invokes ClarettDevice's configuration callback.
+        // Never change safety offsets or rebuild active DMA descriptors here.
+        const auto ret = __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) ? kIOReturnNoDevice :
+            ivars->device->RequestDeviceConfigurationChange(A::TimingAction | requested, nullptr);
+        if (ret != kIOReturnSuccess) {
+            __atomic_store_n(&ivars->timingPending, 0, __ATOMIC_RELEASE);
+            TimingStatus("request-failed", uint32_t(ret));
+        }
+        release();
+    });
+    return kIOReturnSuccess;
+}
+
+kern_return_t ClarettAudio::PerformTimingChange(uint32_t safety) {
+    if (!A::safetyValid(safety) || !__atomic_load_n(&ivars->timingPending, __ATOMIC_ACQUIRE) ||
+        safety != __atomic_load_n(&ivars->desiredSafety, __ATOMIC_ACQUIRE)) return kIOReturnBadArgument;
+    kern_return_t ret = kIOReturnNotReady;
+    // Called by the host only after StopDevice has stopped DMA and drained the
+    // period queue. Do not synchronously enter controlQueue from this callback:
+    // setters synchronize on the audio device's own work queue.
+    if (!__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) &&
+        !__atomic_load_n(&ivars->running, __ATOMIC_ACQUIRE)) {
+        const auto previous = __atomic_load_n(&ivars->safetyFrames, __ATOMIC_ACQUIRE);
+        ret = ivars->device->SetInputSafetyOffset(safety);
+        if (ret == kIOReturnSuccess) {
+            ret = ivars->device->SetOutputSafetyOffset(safety);
+            if (ret != kIOReturnSuccess) {
+                const auto rollback = ivars->device->SetInputSafetyOffset(previous);
+                if (rollback != kIOReturnSuccess) {
+                    ivars->failed = true;
+                    ivars->device->SetDeviceIsAlive(false);
+                }
+            }
+        }
+        if (ret == kIOReturnSuccess) {
+            __atomic_store_n(&ivars->safetyFrames, safety, __ATOMIC_RELEASE);
+            __atomic_store_n(&ivars->periodFrames, A::periodForSafety(safety), __ATOMIC_RELEASE);
+            ivars->timerInterval = ivars->ticksPerSecond / (safety == 512 ? 2000 : 4000);
+        }
+    }
+    __atomic_store_n(&ivars->timingPending, 0, __ATOMIC_RELEASE);
+    TimingStatus(ret == kIOReturnSuccess ? "stable" : "request-failed", uint32_t(ret));
+    return ret;
+}
+
+void ClarettAudio::AbortTimingChange(uint32_t safety) {
+    if (safety != __atomic_load_n(&ivars->desiredSafety, __ATOMIC_ACQUIRE)) return;
+    __atomic_store_n(&ivars->timingPending, 0, __ATOMIC_RELEASE);
+    TimingStatus("request-aborted", uint32_t(kIOReturnAborted));
 }

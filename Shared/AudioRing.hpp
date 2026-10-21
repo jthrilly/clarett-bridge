@@ -16,6 +16,9 @@ constexpr size_t Bytes = (RxSamples + Descriptors * RxSlot + 16383) & ~size_t(16
 // regression. Core Audio's selectable client buffer is a separate setting.
 constexpr uint32_t Safety = 512;
 constexpr uint32_t Period = 256; // hardware period, distinct from the HAL ring size
+constexpr uint64_t TimingAction = 0x636c740000000000ull;
+inline bool safetyValid(uint64_t safety) { return safety == 128 || safety == 256 || safety == 512; }
+inline uint32_t periodForSafety(uint32_t safety) { return safety / 2; }
 inline uint64_t timestampFrame(uint64_t frames) { return frames / Frames * Frames; }
 inline size_t sampleOffset(bool input, uint64_t frame, uint32_t channel) {
     const auto pos = uint32_t(frame % Frames);
@@ -25,14 +28,15 @@ inline size_t sampleOffset(bool input, uint64_t frame, uint32_t channel) {
 inline void store64(volatile uint8_t *p, uint64_t word) {
     for (unsigned j = 0; j < 8; ++j) p[j] = uint8_t(word >> (8 * j));
 }
-inline bool build(volatile uint8_t *p, size_t size, uint64_t address) {
-    if (!p || size < Bytes || (address & 16383) || address > UINT32_MAX - (Bytes - 1)) return false;
+inline bool build(volatile uint8_t *p, size_t size, uint64_t address, uint32_t period = Period) {
+    if (!p || size < Bytes || (address & 16383) || address > UINT32_MAX - (Bytes - 1) ||
+        period < FragmentFrames || period > Frames || period % FragmentFrames || (period & (period - 1))) return false;
     for (size_t i = 0; i < Bytes; ++i) p[i] = 0;
     for (uint32_t i = 0; i < Descriptors; ++i) {
         const uint64_t wrap = i == Descriptors - 1 ? 1 : 0;
         store64(p + i * 8, address + TxSamples + i * TxSlot + wrap);
         store64(p + RxTable + i * 8, address + RxSamples + i * RxSlot + wrap
-                + ((i + 1) % (Period / FragmentFrames) == 0 ? 2 : 0));
+                + ((i + 1) % (period / FragmentFrames) == 0 ? 2 : 0));
     }
     return true;
 }

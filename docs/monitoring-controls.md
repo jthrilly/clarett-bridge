@@ -8,6 +8,28 @@ Software monitoring crackles at multiple Core Audio buffer settings. The user al
 
 Full Security was confirmed by the user earlier with `sudo bputil -d`; SIP was checked independently. No startup-security or management setting was changed.
 
+## Runtime margin control (version 12)
+
+Version 12 is activated and attached. It boots with the clear version 11 baseline (512-frame safety, 256-frame hardware period). Its new `cltp` custom dictionary property accepts only `SafetyFrames` values 128, 256 or 512. The old crackling 64-frame setting is deliberately excluded.
+
+The driver requests `RequestDeviceConfigurationChange`; only `ClarettDevice::PerformDeviceConfigurationChange`, after the host stops I/O, may update the input/output safety offsets. The hardware period becomes half the selected margin; new descriptors are built only on the following engine start. The HAL ring remains 4096 frames. Core Audio automatically restarts existing I/O. Failed and aborted requests are reported separately from the applied value. Nothing is saved to flash.
+
+A runtime change from 512 to 256 completed successfully on the test hardware: Core Audio and the driver both read back safety 256, the hardware period became 128, the pending flag cleared, and streaming resumed. The audible reduced-margin test is pending. An attempted app-buffer request of 128 was accepted, but the running clients retained a 512-frame effective buffer; this must not be reported as a successful 128-frame test.
+
+The host now has a separate Driver safety margin picker. 512 is the verified baseline; 256 and 128 are experimental until independently listened to. A scrollable window keeps the additional controls accessible. The native automation connection failed during installation; the user opened version 12, activated it and reconnected the hardware. Subsequent verification used Core Audio APIs and I/O Registry readback.
+
+For equivalent strict command-line configuration:
+
+```sh
+zsh scripts/audio-configure.sh margin 512  # known clear fallback
+zsh scripts/audio-configure.sh margin 256  # experimental
+zsh scripts/audio-configure.sh margin 128  # experimental
+zsh scripts/audio-configure.sh buffer 128  # app may override; verify actual value
+zsh scripts/audio-status.sh
+```
+
+The utility matches the exact prototype device UID. It does not start I/O, play or record audio, or change default devices. The existing status utility remains read-only. Tests cover all permitted descriptor cadences and rejection of invalid periods and margins. Audio/attachment builds and signature/profile checks pass.
+
 ## Controls
 
 The host offers Core Audio buffer sizes 64, 128, 256, 512, 1024 and 2048 frames, filtered against the live supported range. On this Mac Core Audio reported 15–1536, so 2048 is omitted. The active value is read back after setting. Audio applications can select a different size when opening their engine; this control does not replace an application's own additional buffering.
