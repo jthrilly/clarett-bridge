@@ -62,7 +62,7 @@ Version 10 initial telemetry showed zero late polls, zero input-ahead callbacks,
 
 Version 11 restores a 512-frame input/output safety offset, 256-frame hardware period and 500-microsecond timer target. These are the version 6 settings that passed clear playback and capture tests. Client buffer selection remains available, but the conservative driver margin adds latency; reliable reduced-latency streaming is not yet claimed.
 
-Pending: acceptable software-monitoring delay in a separate audio host, reliable margins below 256 frames, sustained-load/sleep-wake tests, and measured round-trip latency. No test tone or agent recording is used; the user performs audible tests. Rates other than 48 kHz, external clocking, MIDI and Focusrite Control compatibility remain unsupported.
+Verified: clean software monitoring with acceptable perceived delay in GarageBand at margin 256. Pending: reliable margins below 256 frames, sustained-load/sleep-wake tests, and measured round-trip latency. No test tone or agent recording is used; the user performs audible tests. Rates other than 48 kHz, external clocking, MIDI and Focusrite Control compatibility remain unsupported.
 
 ## Primary references
 
@@ -85,6 +85,12 @@ The official Audacity 4.0.1 source explains why that preference does not directl
 
 Thus Audacity requests a 100 ms input latency hint for this path even with its buffer preference set to 10 ms. This is a requested hint, not a measured round-trip latency, and it does not explain or excuse the driver’s separate crackling at margins 64/128. No installed Audacity binary, library or signature was modified.
 
-GarageBand is already installed. The next manual comparison uses it with the Clarett selected for both directions and input monitoring on an audio track, keeping hardware monitoring disabled. This checks a separate software monitoring path, including the ability to hear software effects, without changing driver security or installing another application.
+GarageBand is already installed. The user tested it with the Clarett selected for both directions and input monitoring on an audio track, keeping hardware monitoring disabled, and confirmed clean monitoring with acceptable delay. Core Audio identified GarageBand as the only active Clarett client, with the device at 48 kHz, driver safety 256 frames, hardware period 128 frames and effective client buffer 512 frames. The driver reported zero overruns, input-ahead callbacks and late output writes during the observed test. This verifies a usable separate software-monitoring path without changing driver security or installing another application. Specific effects and measured round-trip latency were not separately tested.
 
 Sources: [Audacity 4.0.1 AudioIO.cpp](https://github.com/audacity/audacity/blob/Audacity-4.0.1/au3/libraries/au3-audio-io/AudioIO.cpp#L602-L652), [PortAudio Core Audio implementation](https://github.com/PortAudio/portaudio/blob/master/src/hostapi/coreaudio/pa_mac_core.c), and [Apple GarageBand input-monitoring guide](https://support.apple.com/guide/garageband/turn-on-input-monitoring-for-audio-tracks-gbnd4bc15233/mac). Downloaded source was inspected only; it was not built or executed. The read-only process diagnostics enumerate only running clients associated with the Clarett device.
+
+## Working configuration
+
+Use driver version 12, 48 kHz, and a 256-frame Driver safety margin for the verified GarageBand monitoring path. The effective Core Audio buffer in this test was 512 frames. Do not equate the host app’s selected 128-frame request with an applied 128-frame buffer. Return to margin 512 if needed; margins 64 and 128 have failed clarity tests. Driver attachment resets the margin to the conservative 512-frame default, so select 256 again after reconnecting if desired.
+
+Hardware direct monitoring was separately confirmed by the user on version 8, with restoration read back when disabled. Its implementation is retained in version 12. Keep that hardware monitor disabled when evaluating the software path. No cable loopback or test tone was used, and no numerical round-trip latency claim is made. Full Security was previously confirmed by the user, SIP remains enabled, and no security-policy or device-management setting was changed.

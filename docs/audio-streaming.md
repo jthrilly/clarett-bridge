@@ -50,7 +50,7 @@ csrutil status
 
 Sanitized tests cover mailbox completion ordering and command scope, descriptor-table bounds and wrap flags, 4 KiB fragment containment, padded capture addressing, hardware counter rollover/overrun handling and HAL-ring timestamp boundaries. The original attach-only build also compiles after the changes, and the generated project is restored to audio mode. Both the host and driver build against the installed Xcode 27/DriverKit 27 SDK. Real signatures and embedded provisioning profiles are checked for the required capabilities and eligibility of this Mac.
 
-This candidate does not support sample-rate selection, external clocks, multiple Claretts, MIDI, general device mixer controls or Focusrite Control. The scoped direct-monitor controls are described separately. Software monitoring currently crackles. Sleep/wake, hot-unplug during active I/O, sustained load, latency and sample integrity still need hardware testing. The existing mailbox stage remains available as a separate build mode. No public distribution signing or entitlement work has been performed.
+This candidate does not support sample-rate selection, external clocks, multiple Claretts, MIDI, general device mixer controls or Focusrite Control. The scoped direct-monitor controls are described separately. The initial 64/128-frame margins crackle. Version 12 software monitoring in GarageBand is user-confirmed clear with acceptable delay at margin 256 and an effective 512-frame Core Audio buffer. Sleep/wake, hot-unplug during active I/O, sustained load, latency and sample integrity still need hardware testing. The existing mailbox stage remains available as a separate build mode. No public distribution signing or entitlement work has been performed.
 
 ## Sources
 
