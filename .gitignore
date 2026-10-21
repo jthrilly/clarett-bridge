@@ -1,0 +1,10 @@
+build/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+__pycache__/
+Signing.local.xcconfig
+*.provisionprofile
+*.mobileprovision
+*.p12
+*.cer
