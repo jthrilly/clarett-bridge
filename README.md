@@ -1,6 +1,6 @@
 # Clarett DriverKit probe
 
-An experimental macOS DriverKit prototype for the original Focusrite Clarett 2Pre **Thunderbolt** interface. Activation, mailbox identification, clear playback and recording, and direct hardware monitoring have passed manual tests on the test Mac. Software input monitoring currently crackles; the reduced-latency streaming path is still under investigation.
+An experimental macOS DriverKit prototype for the original Focusrite Clarett 2Pre **Thunderbolt** interface. Activation, mailbox identification, clear playback and recording, and direct hardware monitoring have passed manual tests on the test Mac. Version 12 is clear at a 256-frame driver margin, but Audacity monitoring delay remains under investigation. Margins of 64/128 frames crackle.
 
 **Hardware milestone passed on 21 October 2026:** version `0.1/4` activated, attached and completed all six mailbox queries on the test Mac, with SIP enabled and Full Security confirmed by the user. See [test evidence and limits](docs/hardware-test-2026-10-21.md).
 

@@ -30,6 +30,36 @@ static UInt32 channels(AudioObjectID device, AudioObjectPropertyScope scope) {
     for (UInt32 i = 0; i < list->mNumberBuffers; ++i) total += list->mBuffers[i].mNumberChannels;
     return total;
 }
+static void clients(AudioObjectID device) {
+    const auto global = kAudioObjectPropertyScopeGlobal;
+    AudioObjectPropertyAddress p{kAudioHardwarePropertyProcessObjectList, global, kAudioObjectPropertyElementMain};
+    UInt32 bytes = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &p, 0, nullptr, &bytes) != noErr) return;
+    std::vector<AudioObjectID> processes(bytes / sizeof(AudioObjectID));
+    if (processes.empty() || !get(kAudioObjectSystemObject, p.mSelector, global, processes.data(), bytes)) return;
+    for (auto process : processes) {
+        UInt32 running = 0, size = sizeof(running);
+        if (!get(process, kAudioProcessPropertyIsRunning, global, &running, size) || !running) continue;
+        bool usesDevice = false;
+        for (auto scope : {kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput}) {
+            p = {kAudioProcessPropertyDevices, scope, kAudioObjectPropertyElementMain};
+            size = 0;
+            if (AudioObjectGetPropertyDataSize(process, &p, 0, nullptr, &size) != noErr) continue;
+            std::vector<AudioObjectID> devices(size / sizeof(AudioObjectID));
+            if (devices.empty() || !get(process, p.mSelector, scope, devices.data(), size)) continue;
+            for (auto value : devices) usesDevice |= value == device;
+        }
+        if (!usesDevice) continue;
+        pid_t pid = 0; size = sizeof(pid);
+        get(process, kAudioProcessPropertyPID, global, &pid, size);
+        CFStringRef bundle = nullptr; size = sizeof(bundle);
+        char label[256] = {};
+        if (get(process, kAudioProcessPropertyBundleID, global, &bundle, size) && bundle) {
+            CFStringGetCString(bundle, label, sizeof(label), kCFStringEncodingUTF8); CFRelease(bundle);
+        }
+        std::printf("  Active client: %s (PID %d)\n", label[0] ? label : "unknown bundle", int(pid));
+    }
+}
 int main() {
     AudioObjectPropertyAddress p{kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
     UInt32 bytes = 0;
@@ -57,6 +87,7 @@ int main() {
         std::printf("%s\n  Device ID: %u; alive: %u; running: %u\n  Rate: %.0f Hz; buffer: %u frames\n  Channels: %u input, %u output\n",
                     text.c_str(), device, alive, running, rate, frames,
                     channels(device, kAudioObjectPropertyScopeInput), channels(device, kAudioObjectPropertyScopeOutput));
+        clients(device);
     }
     if (!found) std::puts("No Clarett Core Audio device found.");
     return found ? 0 : 1;
