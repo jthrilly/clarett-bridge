@@ -93,4 +93,16 @@ The installed app was also exercised through its native controls. Enabling softw
 
 The normal Core Audio fader range is reduced from 127 to 48 dB, changing its midpoint from approximately −64 to −24 dB relative to each pair's maximum. Normal volume-key steps become approximately 3 dB. The zero endpoint still selects the hardware's −127 dB floor, and internal quiet/preserved levels are never raised to fit the advertised fader range. The same driver-side per-pair ceilings, safe takeover and cap-raise preservation policy remain in force.
 
-Tests cover the new midpoint and endpoints, the 1 dB quiet-end quantization boundary, monotonicity through every whole-percent position, invalid/nonfinite requests, below-range preserved states and ceiling enforcement across all positions and maxima. The signed build and sanitized tests pass. Driver activation, live readback and the user's assessment of the revised scaling are pending.
+Tests cover the new midpoint and endpoints, the 1 dB quiet-end quantization boundary, monotonicity through every whole-percent position, invalid/nonfinite requests, below-range preserved states and ceiling enforcement across all positions and maxima. The signed build and sanitized tests pass. Driver 16 is activated and attached. Its normal range is published as 48 dB, and an idle hardware run verified these values with −60 dB maxima on both pairs:
+
+| macOS/Core Audio scalar | Logical attenuation | Hardware attenuation, both pairs |
+| --- | --- | --- |
+| 0% | 127 dB quiet endpoint | 127 dB |
+| 25% | 36 dB | 96 dB |
+| 50% | 24 dB | 84 dB |
+| 75% | 12 dB | 72 dB |
+| 100% | 0 dB | 60 dB |
+
+A direct request at the −48 dB control endpoint also selected the 127 dB hardware floor. A below-range preservation case was checked: at 17% scalar, the driver quantized to 40 dB logical attenuation and both gains were −100 dB with −60 dB maxima. Raising pair 1–2's maximum to −50 dB preserved its −100 dB gain, reduced the other pair to −110 dB and reported the standard fader's zero endpoint for the now-50 dB logical attenuation. Explicit scalar zero then selected the −127 dB floor. Both pairs were returned to quiet knob ownership and −30 dB maxima before the user's next test.
+
+All completed checks reported a new revision, no pending work, zero error and no uncertainty. The agent did not start audio. The user's assessment of the revised scaling and playback quality is **pending**.
