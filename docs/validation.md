@@ -66,4 +66,24 @@ The signed local build and sanitizer checks pass. New tests cover strict rate/cl
 
 The implementation adds the standard Core Audio output/main level control, explicit per-pair software ownership, and driver-enforced ceilings. Sanitized tests cover every supported ceiling/logical attenuation combination, full-volume ceiling mapping, fractional/invalid dB requests, quiet takeover, no level increase on a ceiling raise, refusal of a louder knob handover, failed/uncertain command sequences and exact protocol allowlist boundaries. Flash commits and master-knob writes are rejected.
 
-The host and driver build with the existing development signing configuration. Representative Outputs previews are generated without touching hardware. The signed host 16 / driver 15 is installed. Driver activation/attachment, hardware command readback and manual listening are **pending**; a successful build or a config-byte readback does not qualify audible attenuation, clipping, monitoring or all physical output paths.
+The signed host 16 / driver 15 is installed, activated and attached. The interface remained alive and idle at 48 kHz, with a 512-frame buffer and margin, during the command/readback checks on 22 October 2026. Representative Outputs previews are generated separately without touching hardware.
+
+### Hardware command and readback checks
+
+Both stereo gain pairs and ownership bytes were acknowledged, committed and read back. Every completed check reported `Status=verified`, zero error, no uncertainty and a newer completion revision. No audio was played or recorded by the validation utility.
+
+| Request | Verified result |
+| --- | --- |
+| Enable both pairs, maximum −60 dB | Both gains staged at −127 dB before software takeover |
+| Full logical volume / Core Audio scalar 100% | Both hardware gains −60 dB, within their maxima |
+| Core Audio scalar 50% | Quantized logical level −64 dB; both hardware gains −124 dB |
+| Raise pair 1–2 maximum from −60 to −50 dB | Current pair 1–2 gain held at −60 dB; logical level reduced to −10 dB, pair 3–4 became −70 dB |
+| Separate volume-up request after that raise | Hardware gains −50 / −60 dB, matching the two maxima |
+| Lower pair 1–2 maximum back to −60 dB | Both hardware gains −60 dB |
+| Logical level −20 dB | Both hardware gains −80 dB |
+| Minimum software volume | Both hardware gains −127 dB |
+| Return both pairs to a fully-down knob | Hardware ownership verified for both pairs |
+
+The installed app was also exercised through its native controls. Enabling software control for pair 1–2 started at −127 dB. Its slider at 50% produced a verified −94 dB hardware gain with a −30 dB maximum. Applying a −40 dB maximum attenuated to −104 dB; raising the maximum back to −30 dB held the output at −104 dB and reduced the displayed logical volume to approximately 42%. The saved preferences were read back at −30 dB for both pairs after restoration. At the end of these checks, software volume was returned to zero and both pairs to knob ownership for the user's listening test.
+
+**Manual listening validation is pending.** Config-byte readback proves the device accepted the written gain and ownership bytes in this session; it does not independently measure acoustic attenuation, clipping, monitoring quality or every physical output path. A louder-knob handover refusal is covered by the safety tests; this hardware run checked only a quiet, fully-down handover. macOS volume-key audible behavior is part of the requested manual test.

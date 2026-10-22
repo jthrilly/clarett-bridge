@@ -1,6 +1,6 @@
 # Output volume and maximum levels
 
-Clarett Bridge 0.3.0 adds a hardware-backed Core Audio output volume control and an **Outputs** page. It requires audio driver **15** (host build **16**). This is an experimental implementation: command/readback validation and a manual listening check are separate milestones; see [validation](validation.md).
+Clarett Bridge 0.3.0 adds a hardware-backed Core Audio output volume control and an **Outputs** page. It requires audio driver **15** (host build **16**). The driver has passed live command/readback checks on both pairs; manual listening remains a separate qualification. See [validation](validation.md) for the exact results and remaining checks.
 
 ![Outputs page](images/outputs.png)
 
