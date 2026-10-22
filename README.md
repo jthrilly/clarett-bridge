@@ -47,7 +47,7 @@ python3 scripts/verify-signing.py 'build/audio/Build/Products/Debug/Clarett Brid
 
 New developers must register their own bundle identifiers and capabilities; see the [complete build and signing guide](docs/building.md). Install the verified app in `/Applications`, open **Driver Setup → Activate driver**, and complete the normal macOS approval flow. Keep Full Security and SIP enabled. Device-management approval policy may differ on other Macs.
 
-Host build 16 (0.3.0) adds an Outputs page and requires activating audio driver version 15 for hardware-backed volume controls. Sample-rate changes require driver 13 or later. Driver version 12 remains the previous manually audio-tested baseline; see [validation](docs/validation.md) for newer command/readback results.
+Host build 17 (0.3.1) adds an Outputs page and requires activating audio driver version 16 for hardware-backed volume controls. Sample-rate changes require driver 13 or later. Driver 15 passed a manual Spotify volume-control check; driver 16 revises its slider range. See [validation](docs/validation.md) for the tested scope and remaining checks.
 
 ## Use it
 
@@ -65,7 +65,7 @@ Audacity 4.0.1’s software-monitoring path requests its audio library’s high 
 
 ## Output volume
 
-The **Outputs** page offers software ownership for line outputs 1–2 and 3–4/headphones, with a separate maximum for each pair. The main slider and macOS volume keys use the hardware gain commands. With a −20 dB maximum, **100% software volume remains −20 dB at the hardware**. Limits are enforced in the driver, default to −30 dB, and can be adjusted from −60 to 0 dB. Raising a maximum preserves the current level until you deliberately turn up.
+The **Outputs** page offers software ownership for line outputs 1–2 and 3–4/headphones, with a separate maximum for each pair. The main slider and macOS volume keys use the hardware gain commands. With a −20 dB maximum, **100% software volume remains −20 dB at the hardware**. Limits are enforced in the driver, default to −30 dB, and can be adjusted from −60 to 0 dB. Raising a maximum preserves the current level until you deliberately turn up. Driver 16 uses a 48 dB normal adjustment range (about 3 dB per standard Mac volume-key step), with 0% selecting the quiet hardware floor.
 
 Start with physical levels down. New connections leave device controls unchanged until software control is enabled. A return to knob control is refused if its position would make the output jump louder. These limits apply in software mode and are not a calibrated loudness limit. See [output volume and safety](docs/output-volume.md).
 

@@ -27,8 +27,25 @@ int main() {
     uint32_t attenuation = 0;
     assert(V::attenuationFromDecibels(-0.1f, attenuation) && attenuation == 1);
     assert(V::attenuationFromDecibels(0, attenuation) && attenuation == 0);
-    assert(V::attenuationFromDecibels(-127, attenuation) && attenuation == 127);
-    for (auto invalid : {0.1f, -127.1f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+    assert(V::attenuationFromDecibels(-48, attenuation) && attenuation == 127);
+    assert(V::attenuationFromDecibels(-47.1f, attenuation) && attenuation == 127);
+    assert(V::attenuationFromDecibels(-47, attenuation) && attenuation == 47);
+    assert(V::attenuationFromDecibels(-24, attenuation) && attenuation == 24);
+    assert(V::controlDecibels(127) == -48 && V::controlDecibels(74) == -48);
+    assert(V::controlDecibels(24) == -24 && V::controlDecibels(0) == 0);
+    unsigned previous = V::Floor;
+    for (unsigned percent = 0; percent <= 100; ++percent) {
+        const float db = -float(V::ControlRange) * (1 - float(percent) / 100);
+        unsigned current = 0;
+        assert(V::attenuationFromDecibels(db, current));
+        assert(current <= previous); previous = current;
+        for (unsigned cap = 0; cap <= 60; ++cap) {
+            V::Settings point{{true,true},{cap,cap},current};
+            assert(V::gain(point,0) >= cap);
+        }
+    }
+    assert(previous == 0);
+    for (auto invalid : {0.1f, -48.1f, -127.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
         assert(!V::attenuationFromDecibels(invalid, attenuation));
     for (unsigned cap = 0; cap <= 60; ++cap) for (unsigned a = 0; a <= 127; ++a) {
         V::Settings s{{true,true},{cap,cap},a};

@@ -1,6 +1,6 @@
 # Output volume and maximum levels
 
-Clarett Bridge 0.3.0 adds a hardware-backed Core Audio output volume control and an **Outputs** page. It requires audio driver **15** (host build **16**). The driver has passed live command/readback checks on both pairs; manual listening remains a separate qualification. See [validation](validation.md) for the exact results and remaining checks.
+Clarett Bridge 0.3.1 adds a hardware-backed Core Audio output volume control and an **Outputs** page. It requires audio driver **16** (host build **17**). The driver has passed live command/readback checks on both pairs; manual listening remains a separate qualification. See [validation](validation.md) for the exact results and remaining checks.
 
 ![Outputs page](images/outputs.png)
 
@@ -16,6 +16,12 @@ Clarett Bridge 0.3.0 adds a hardware-backed Core Audio output volume control and
 6. **Use hardware knob** returns a controlled pair to physical ownership. The driver refuses if the live knob position is louder than that pair's current software level. Turn the monitor knob fully down and try again. Once in hardware mode, its software ceiling no longer governs output level.
 
 The app saves confirmed ceiling preferences on this Mac. It does not save gains or ownership to the interface's flash. Closing the app leaves an enabled driver and its current limits working, including macOS volume changes. On driver reattachment, software ownership is not automatically asserted: select it again to apply your saved ceiling atomically. Warm reconnects can retain the previous volatile device settings, while the new driver describes unasserted ownership as **Unchanged** rather than guessing it from boot-time config bytes. A cold power cycle returns the device to its saved configuration.
+
+### Software slider range
+
+Driver 16 exposes a **48 dB normal adjustment range** through Apple's [AudioDriverKit level control](https://developer.apple.com/documentation/audiodriverkit/iouseraudiolevelcontrol). Its nonzero scalar positions map across that dB span: 50% is −24 dB relative to the selected maximum, 75% is −12 dB and 100% is the maximum. Normal Mac volume keys therefore change approximately 3 dB per 1/16 step, with 1 dB hardware quantization. Driver 15 exposed all 127 dB across the slider, putting 50% around −64 dB and concentrating useful listening levels near the top; the user confirmed clean control but reported that poor scaling.
+
+The zero endpoint (and values quantized to it) selects the −127 dB hardware floor. This is a special quiet endpoint rather than a normal −48 dB gain. Quiet takeover and preserved levels after raising a ceiling can also be below the normal span; the standard fader reports its zero endpoint for those levels, while the applied hardware attenuation remains visible in the app and Diagnostics. The driver never turns hardware up merely to fit it inside the normal fader span. An explicit move above zero selects a normal level again.
 
 Minimum software volume selects the device's −127 dB attenuation floor. This is **not a hardware mute**. No master mute/dim or physical headphone-amplifier controls are rewritten. The ceilings govern the interface's digital output gain while software ownership is enabled; they cannot calibrate acoustic loudness or constrain a physical knob after returning control to it.
 

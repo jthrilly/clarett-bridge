@@ -6,7 +6,7 @@
 #define super IOUserAudioLevelControl
 struct ClarettVolume_IVars { ClarettAudio *owner; };
 bool ClarettVolume::Configure(ClarettAudio *owner) {
-    if (!super::init(owner, true, -float(Clarett::Volume::Range), {-float(Clarett::Volume::Range), 0},
+    if (!super::init(owner, true, -float(Clarett::Volume::ControlRange), {-float(Clarett::Volume::ControlRange), 0},
         IOUserAudioObjectPropertyElementMain, IOUserAudioObjectPropertyScope::Output,
         IOUserAudioClassID::VolumeControl)) return false;
     ivars = IONewZero(ClarettVolume_IVars, 1);

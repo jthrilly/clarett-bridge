@@ -86,7 +86,7 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
             monitorAvailable = true; timingAvailable = true; volumeAvailable = true
             outputPairs[0].softwareEnabled = true; outputPairs[0].ownershipKnown = true
             outputPairs[0].attenuation = 42
-            outputVolume = 90.55
+            outputVolume = 75
             volumeMessage = "Output gains and software ownership verified."
 
             sampleRate = 48000; actualBuffer = 512; selectedBuffer = 128

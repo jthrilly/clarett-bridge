@@ -47,7 +47,7 @@ static void status(AudioDeviceID device) {
     while ((service = IOIteratorNext(iterator))) {
         CFMutableDictionaryRef values = nullptr;
         if (IORegistryEntryCreateCFProperties(service,&values,kCFAllocatorDefault,0) == KERN_SUCCESS && values) {
-            const char *keys[] = {"Status","Error","Revision","Pending","Uncertain","Attenuation","Enabled12","Enabled34","Known12","Known34","Ceiling12","Ceiling34","Hardware12","Hardware34"};
+            const char *keys[] = {"Status","Error","Revision","RangeDB","Pending","Uncertain","Attenuation","Enabled12","Enabled34","Known12","Known34","Ceiling12","Ceiling34","Hardware12","Hardware34"};
             for (auto key : keys) {
                 char full[80]; std::snprintf(full,sizeof(full),"ClarettVolume%s",key);
                 auto name = CFStringCreateWithCString(kCFAllocatorDefault,full,kCFStringEncodingUTF8);
@@ -75,9 +75,10 @@ int main(int argc, char **argv) {
     const bool configure = argc == 5 && !std::strcmp(argv[1],"configure") &&
         integer(argv[2],0,3,mask) && integer(argv[3],0,60,cap12) && integer(argv[4],0,60,cap34);
     if (!report && !db && !scalar && !configure) {
-        std::fputs("Usage: output-control status | level -127..0 | scalar 0..100 | configure mask cap12 cap34\n"
+        std::fputs("Usage: output-control status | level DB | scalar 0..100 | configure mask cap12 cap34\n"
             "mask: 0=unchanged/return controlled pairs to knob, 1=1–2, 2=3–4, 3=both software.\n"
             "Caps are positive attenuation codes (0..60); level 0/scalar 100 means the caps, not hardware unity.\n"
+            "Level must be inside the active driver's advertised range (driver 16: -48..0 dB; minimum selects -127 dB hardware floor).\n"
             "Set physical levels down first. Requests are asynchronous: inspect status separately.\n",stderr); return 2;
     }
     const auto device = findDevice();
@@ -96,6 +97,15 @@ int main(int argc, char **argv) {
         CFRelease(request); CFRelease(a); CFRelease(b);
     } else {
         auto p = property(db ? kAudioDevicePropertyVolumeDecibels : kAudioDevicePropertyVolumeScalar,kAudioObjectPropertyScopeOutput);
+        if (db) {
+            auto rangeProperty = property(kAudioDevicePropertyVolumeRangeDecibels,kAudioObjectPropertyScopeOutput);
+            AudioValueRange range{}; UInt32 bytes = sizeof(range);
+            if (AudioObjectGetPropertyData(device,&rangeProperty,0,nullptr,&bytes,&range) != noErr ||
+                level < range.mMinimum || level > range.mMaximum) {
+                std::fputs("Level is outside the active driver's advertised dB range. Use scalar 0 for the quiet endpoint.\n",stderr);
+                return 2;
+            }
+        }
         Float32 value = db ? Float32(level) : Float32(level) / 100;
         result = AudioObjectSetPropertyData(device,&p,0,nullptr,sizeof(value),&value);
     }

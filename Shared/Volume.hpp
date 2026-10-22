@@ -4,6 +4,9 @@
 
 namespace Clarett::Volume {
 constexpr unsigned Pairs = 2, Floor = 127, Range = 127, MaximumCeiling = 60, DefaultCeiling = 30;
+// Keep the normal macOS fader useful: ~3 dB per 1/16-volume step.
+// Its zero endpoint selects the hardware floor, outside the normal range.
+constexpr unsigned ControlRange = 48;
 struct Settings { bool enabled[Pairs]; unsigned ceiling[Pairs]; unsigned attenuation; };
 struct State {
     Settings settings{{false, false}, {DefaultCeiling, DefaultCeiling}, Range};
@@ -11,10 +14,16 @@ struct State {
     bool uncertain = false;
 };
 inline bool attenuationFromDecibels(float db, uint32_t &attenuation) {
-    if (!(db >= -float(Range) && db <= 0)) return false;
+    if (!(db >= -float(ControlRange) && db <= 0)) return false;
     attenuation = uint32_t(-db);
     if (float(attenuation) < -db) ++attenuation;
+    if (attenuation >= ControlRange) attenuation = Floor;
     return true;
+}
+inline float controlDecibels(unsigned attenuation) {
+    // Quiet takeover/preserved levels can be below the normal fader range.
+    // Report the quiet endpoint; never turn hardware up to fit that range.
+    return -float(attenuation >= ControlRange ? ControlRange : attenuation);
 }
 inline bool valid(const Settings &s) {
     return s.attenuation <= Range && s.ceiling[0] <= MaximumCeiling && s.ceiling[1] <= MaximumCeiling;

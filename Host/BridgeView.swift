@@ -107,7 +107,7 @@ struct BridgeView: View {
                     Text(controller.audioDeviceAvailable ? "Clarett 2Pre" : "No interface connected").font(.caption)
                 }
                 Text("Independent, experimental driver").font(.system(size: 10)).foregroundStyle(.secondary)
-                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0")")
+                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.1")")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             }.padding(20)
         }.frame(width: 194).background(Color(nsColor: .underPageBackgroundColor).opacity(0.45))

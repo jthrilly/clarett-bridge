@@ -34,7 +34,7 @@ plist('Driver/Info.plist', {
     'CFBundleExecutable': '$(EXECUTABLE_NAME)',
     'CFBundleName': '$(PRODUCT_NAME)',
     'CFBundlePackageType': 'DEXT',
-    'CFBundleShortVersionString': '0.3',
+    'CFBundleShortVersionString': '0.3.1',
     'CFBundleVersion': '$(CURRENT_PROJECT_VERSION)',
     'OSBundleUsageDescription': 'Identify a connected Clarett 2Pre Thunderbolt interface.',
     'IOKitPersonalities': {'ClarettProbe': {
@@ -66,7 +66,7 @@ plist('Host/Info.plist', {
     'LSApplicationCategoryType': 'public.app-category.music',
     'ClarettDriverIdentifier': BUNDLE_PREFIX + '.driver',
     'CFBundlePackageType': 'APPL',
-    'CFBundleShortVersionString': '0.3.0',
+    'CFBundleShortVersionString': '0.3.1',
     'CFBundleVersion': '$(CURRENT_PROJECT_VERSION)',
     'LSMinimumSystemVersion': '$(MACOSX_DEPLOYMENT_TARGET)',
     'NSPrincipalClass': 'NSApplication',
@@ -106,8 +106,8 @@ common = {
     'GCC_WARN_UNDECLARED_SELECTOR': 'YES', 'GCC_WARN_UNINITIALIZED_AUTOS': 'YES_AGGRESSIVE',
     'ENABLE_USER_SCRIPT_SANDBOXING': 'YES', 'CODE_SIGN_STYLE': 'Automatic',
     'DEVELOPMENT_TEAM': '', 'CODE_SIGN_IDENTITY': 'Apple Development',
-    'CLARETT_PROBE_MODE': MODE, 'CLARETT_DRIVER_VERSION': '15' if AUDIO else '4' if MODE == 'mailbox' else '1',
-    'CLARETT_HOST_VERSION': '16',
+    'CLARETT_PROBE_MODE': MODE, 'CLARETT_DRIVER_VERSION': '16' if AUDIO else '4' if MODE == 'mailbox' else '1',
+    'CLARETT_HOST_VERSION': '17',
 }
 def configs(name, extra):
     entries = []

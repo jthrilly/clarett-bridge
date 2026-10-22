@@ -1184,6 +1184,7 @@ void ClarettAudio::VolumeStatus(const char *state, uint32_t error) {
         props->setObject("ClarettVolumeStatus", label);
         number(props, "ClarettVolumeError", error);
         number(props, "ClarettVolumeRevision", ivars->volumeRevision);
+        number(props, "ClarettVolumeRangeDB", Clarett::Volume::ControlRange);
         number(props, "ClarettVolumePending", __atomic_load_n(&ivars->volumePending, __ATOMIC_ACQUIRE));
         number(props, "ClarettVolumeUncertain", ivars->volume.uncertain);
         number(props, "ClarettVolumeAttenuation", ivars->volume.settings.attenuation);
@@ -1242,7 +1243,7 @@ kern_return_t ClarettAudio::QueueVolume(bool custom, bool enabled12, bool enable
         // This completion runs after the property handler returns. Never wait
         // for the mailbox from a level-control callback: SetDecibelValue uses
         // that control's work queue and would otherwise deadlock.
-        if (ivars->volumeControl) ivars->volumeControl->SetDecibelValue(-float(ivars->volume.settings.attenuation));
+        if (ivars->volumeControl) ivars->volumeControl->SetDecibelValue(Clarett::Volume::controlDecibels(ivars->volume.settings.attenuation));
         ++ivars->volumeRevision;
         __atomic_store_n(&ivars->volumePending, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&ivars->controlPending, 0, __ATOMIC_RELEASE);
