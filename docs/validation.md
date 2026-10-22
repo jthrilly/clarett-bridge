@@ -1,6 +1,6 @@
 # Validation and supported scope
 
-Test date: **21 October 2026**. Hardware: original Clarett 2Pre Thunderbolt, Apple silicon M5 Max MacBook Pro, macOS 27.0.1, Xcode 27 / DriverKit 27. One device/Mac combination was tested.
+Initial audio test date: **21 October 2026**. Sample-rate switching checked **22 October 2026**. Hardware: original Clarett 2Pre Thunderbolt, Apple silicon M5 Max MacBook Pro, macOS 27.0.1, Xcode 27 / DriverKit 27. One device/Mac combination was tested.
 
 | Check | Evidence |
 | --- | --- |
@@ -36,7 +36,7 @@ Representative previews were rendered from the actual SwiftUI views with example
 
 ## Limits
 
-This is a source/development release, not a generally provisioned binary driver. Only 48 kHz/internal clock and the original Thunderbolt 2Pre geometry are implemented. MIDI, other sample rates, external clocking, general device configuration and Focusrite Control compatibility are absent.
+This is a source/development release, not a generally provisioned binary driver. The original Thunderbolt 2Pre geometry and 44.1, 48, 88.2 and 96 kHz internal-clock operation are implemented. MIDI, 176.4/192 kHz, external clocking, general device configuration and Focusrite Control compatibility are absent.
 
 The user performed manual listening/recording tests. No agent-generated test tone, connected cable loopback or numerical round-trip measurement was used. Individual software effects were not separately qualified. Sleep/wake, sustained stress, arbitrary hot-unplug scenarios, other models/Macs and public distribution signing remain unqualified.
 
@@ -44,6 +44,20 @@ The first mailbox/audio implementations and corrected failures remain documented
 
 ## Sample-rate update (0.2.0 / driver 13)
 
-Implemented rates: 44.1, 48, 88.2 and 96 kHz, internal clock. New hardware validation is pending activation. The historical listening results above cover the version 12 / 48 kHz baseline, not all new rates.
+The user activated driver 13 and reconnected the powered interface. The system reports version 0.2/13 activated and enabled; the attached device advertises 44.1, 48, 88.2 and 96 kHz. Its startup identification queries validated both rate bands, including 10 live capture channels at double speed.
+
+On 22 October 2026, with audio stopped and hardware monitoring off, these changes passed:
+
+| Transition | Hardware clock | Core Audio nominal / input / output | Live capture slots |
+| --- | --- | --- | --- |
+| 48 → 44.1 kHz | 44,100 Hz | All 44,100 Hz | 14 |
+| 44.1 → 88.2 kHz | 88,200 Hz | All 88,200 Hz | 10 |
+| 88.2 → 96 kHz | 96,000 Hz | All 96,000 Hz | 10 |
+| 96 → 44.1 kHz | 44,100 Hz | All 44,100 Hz | 14 |
+| 44.1 → 48 kHz | 48,000 Hz | All 48,000 Hz | 14 |
+
+Every readback reported a stable rate, zero rate error and an alive, idle device. The buffer and driver margin remained 512 frames, and the transport stayed 14 input / 4 output channels. The interface was restored to 48 kHz. No playback, recording or monitoring was started during these checks.
+
+These results validate idle clock changes and matching stream metadata, not audible playback/capture or live rate changes during I/O. Manual listening/recording at the new rates is pending. The historical listening results above cover the version 12 / 48 kHz baseline.
 
 The signed local build and sanitizer checks pass. New tests cover strict rate/clock-source allowlists, speed-band read bounds and routing preservation, correct double-speed packet lengths/padding, S/MUX residue suppression, rate-scaled polling, ring-wrap watchdogs and timestamp conversion. The red-accent previews are generated from the real SwiftUI views with example data.

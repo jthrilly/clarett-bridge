@@ -24,10 +24,12 @@ This is an **experimental source release**, tested on one Clarett 2Pre Thunderbo
 | Playback and recording | Clear Spotify playback and Audacity recording/listen-back |
 | Software monitoring | Clean, acceptably responsive monitoring in GarageBand at a 256-frame driver margin |
 | Hardware direct monitoring | Input 1/2 or stereo mix, selectable output pairs and live/computer blend; manually verified |
-| Sample rates | 44.1, 48, 88.2 and 96 kHz implemented, internal clock; new rate transitions await hardware validation |
+| Sample rates | 44.1, 48, 88.2 and 96 kHz: hardware clock and both stream formats verified; new-rate listening tests pending |
 | Transport channels | 14 capture / 4 playback; 10 capture slots are live at 88.2/96 kHz; these are not physical socket counts |
 | Margins below 256 frames | Unreliable: crackling observed at 64 and 128 frames |
 | MIDI, 176.4/192 kHz, external clocks, Focusrite Control | Not implemented |
+
+The playback, recording and monitoring listening results above cover the previous version 12 / 48 kHz baseline. Driver 13 has passed idle sample-rate switching and format-readback checks; listening/recording at the new rates is still pending.
 
 The verified software-monitoring test used an **effective 512-frame Core Audio buffer**. Selecting a requested buffer in the app does not guarantee another audio application will use it. Numerical round-trip latency, sustained load and sleep/wake are not yet qualified. See [validation](docs/validation.md).
 
