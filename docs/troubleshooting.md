@@ -50,3 +50,7 @@ If the driver reports a failed or uncertain clock transaction, it may mark the d
 ## Output volume unavailable or refused
 
 Hardware output controls require activating driver 15, not only opening the new host app. On **Outputs**, enable software control explicitly for the desired pair; until then, macOS level requests are refused. Choose a quiet maximum and start with physical levels down. A refused return to knob control means the live monitor knob is above the current software level: turn it fully down and try again. If output state is uncertain, stop audio, turn physical levels down and reconnect; inspect Diagnostics before enabling again. Minimum volume is attenuation rather than hardware mute. Full details are in [output volume](output-volume.md).
+
+## Mac mute key
+
+Hardware mute requires driver 17 or later and the Clarett selected as the Mac's output. **Outputs → Mute / Unmute** uses the same standard Core Audio control. Mute covers all analogue outputs, including headphones and direct monitoring, even when gains follow the physical knob. If a retained/legacy mute leaves silence after reconnect and ownership is unknown, toggle Mute on then off. If Diagnostics reports uncertainty, stop audio and turn physical levels down before reconnecting; the driver refuses an unmute after a failed safety check. An uncertain release acknowledgement is reported as unknown rather than proof that the hardware stayed muted.

@@ -54,6 +54,9 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
     @Published var volumeBusy = false
     @Published var volumeUncertain = false
     @Published var outputVolume: Double = 0
+    @Published var muteAvailable = false
+    @Published var outputMuted = false
+    @Published var muteKnown = false
     @Published var volumeMessage = "Output controls require driver version 15 or later."
     var volumeEditing = false
     private var volumeDeadline: Date?
@@ -83,7 +86,7 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
         }
         if preview {
             attached = true; streaming = true; audioDeviceAvailable = true
-            monitorAvailable = true; timingAvailable = true; volumeAvailable = true
+            monitorAvailable = true; timingAvailable = true; volumeAvailable = true; muteAvailable = true; muteKnown = true
             outputPairs[0].softwareEnabled = true; outputPairs[0].ownershipKnown = true
             outputPairs[0].attenuation = 42
             outputVolume = 75
@@ -174,7 +177,7 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
             audioDeviceAvailable = AudioObjectGetPropertyData(audioDevice, &property, 0, nil, &size, &alive) == noErr && alive != 0
         }
         guard audioDeviceAvailable else {
-            monitorAvailable = false; timingAvailable = false; rateAvailable = false; volumeAvailable = false
+            monitorAvailable = false; timingAvailable = false; rateAvailable = false; volumeAvailable = false; muteAvailable = false; muteKnown = false
             volumeBusy = false; volumeDeadline = nil; volumeRequest = nil
             volumeMessage = "Connect the interface to use output controls."
 
@@ -246,6 +249,15 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
                 outputVolume = Double(value) * 100
             }
         }
+        var muteProperty = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioObjectPropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        muteAvailable = AudioObjectHasProperty(audioDevice, &muteProperty)
+        if muteAvailable && !volumeBusy {
+            var muted: UInt32 = 0; var muteSize = UInt32(MemoryLayout<UInt32>.size)
+            if AudioObjectGetPropertyData(audioDevice, &muteProperty, 0, nil, &muteSize, &muted) == noErr {
+                outputMuted = muted != 0
+            }
+        }
         property = address(Self.monitorSelector)
         monitorAvailable = AudioObjectHasProperty(audioDevice, &property)
         property = address(Self.timingSelector)
@@ -313,6 +325,14 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
             monitorMessage = "Hardware monitor request failed (\(status)). Check Diagnostics."
         }
     }
+    func toggleMute() {
+        guard muteAvailable && !volumeBusy && !volumeUncertain else { return }
+        var property = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioObjectPropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var muted: UInt32 = outputMuted ? 0 : 1
+        let status = AudioObjectSetPropertyData(audioDevice, &property, 0, nil, UInt32(MemoryLayout<UInt32>.size), &muted)
+        volumeSubmitted(status)
+    }
     func applyOutputVolume() {
         guard volumeAvailable && !volumeBusy && !volumeUncertain && outputPairs.contains(where: { $0.softwareEnabled }) else { return }
         // Standard Core Audio control: system volume keys use this same driver
@@ -364,6 +384,8 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
         guard let state = properties["ClarettVolumeStatus"] as? String else { return }
         let revision = (properties["ClarettVolumeRevision"] as? NSNumber)?.uint64Value ?? 0
         volumeRevision = revision
+        muteKnown = (properties["ClarettVolumeMuteKnown"] as? NSNumber)?.boolValue ?? false
+        outputMuted = (properties["ClarettVolumeMuted"] as? NSNumber)?.boolValue ?? false
         volumeUncertain = (properties["ClarettVolumeUncertain"] as? NSNumber)?.boolValue ?? false
         let pending = (properties["ClarettVolumePending"] as? NSNumber)?.boolValue ?? false
         if pending { volumeBusy = true }
@@ -389,6 +411,9 @@ final class BridgeController: NSObject, ObservableObject, OSSystemExtensionReque
         if volumeUncertain { volumeMessage = "Output state is uncertain. Turn physical levels down and reconnect before using software control again." }
         else if state == "turn-knob-down" { volumeMessage = "Turn the front-panel monitor knob fully down, then try returning control to the knob again." }
         else if volumeBusy { volumeMessage = "Waiting for hardware output readback…" }
+        else if state == "verified" && outputMuted && muteKnown {
+            volumeMessage = "Muted. All four analogue outputs, headphones and direct monitoring are silenced."
+        }
         else if state == "verified" {
             volumeMessage = outputPairs.contains(where: { $0.softwareEnabled }) ?
                 "Output gains and software ownership verified. Raising a limit keeps the current level unchanged until you turn the volume up." :

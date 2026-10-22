@@ -41,13 +41,17 @@ static void status(AudioDeviceID device) {
     Float32 scalar = 0; size = sizeof(scalar);
     if (AudioObjectGetPropertyData(device,&p,0,nullptr,&size,&scalar) == noErr)
         std::printf("Core Audio scalar: %.6f\n", scalar);
+    p = property(kAudioDevicePropertyMute, kAudioObjectPropertyScopeOutput);
+    UInt32 muted = 0; size = sizeof(muted);
+    if (AudioObjectGetPropertyData(device,&p,0,nullptr,&size,&muted) == noErr)
+        std::printf("Core Audio mute: %u\n", muted);
     io_iterator_t iterator = 0;
     if (IOServiceGetMatchingServices(kIOMainPortDefault,IOServiceNameMatching("ClarettProbe"),&iterator) != KERN_SUCCESS) return;
     io_service_t service;
     while ((service = IOIteratorNext(iterator))) {
         CFMutableDictionaryRef values = nullptr;
         if (IORegistryEntryCreateCFProperties(service,&values,kCFAllocatorDefault,0) == KERN_SUCCESS && values) {
-            const char *keys[] = {"Status","Error","Revision","RangeDB","Pending","Uncertain","Attenuation","Enabled12","Enabled34","Known12","Known34","Ceiling12","Ceiling34","Hardware12","Hardware34"};
+            const char *keys[] = {"Status","Error","Revision","RangeDB","Muted","MuteKnown","MuteByte","MuteMask","MuteByteRead","MuteMaskRead","Pending","Uncertain","Attenuation","Enabled12","Enabled34","Known12","Known34","Ceiling12","Ceiling34","Hardware12","Hardware34"};
             for (auto key : keys) {
                 char full[80]; std::snprintf(full,sizeof(full),"ClarettVolume%s",key);
                 auto name = CFStringCreateWithCString(kCFAllocatorDefault,full,kCFStringEncodingUTF8);
@@ -72,10 +76,12 @@ int main(int argc, char **argv) {
     int level = 0, mask = 0, cap12 = 0, cap34 = 0;
     const bool db = argc == 3 && !std::strcmp(argv[1],"level") && integer(argv[2],-127,0,level);
     const bool scalar = argc == 3 && !std::strcmp(argv[1],"scalar") && integer(argv[2],0,100,level);
+    const bool mute = argc == 3 && !std::strcmp(argv[1],"mute") &&
+        (!std::strcmp(argv[2],"on") || !std::strcmp(argv[2],"off"));
     const bool configure = argc == 5 && !std::strcmp(argv[1],"configure") &&
         integer(argv[2],0,3,mask) && integer(argv[3],0,60,cap12) && integer(argv[4],0,60,cap34);
-    if (!report && !db && !scalar && !configure) {
-        std::fputs("Usage: output-control status | level DB | scalar 0..100 | configure mask cap12 cap34\n"
+    if (!report && !db && !scalar && !configure && !mute) {
+        std::fputs("Usage: output-control status | level DB | scalar 0..100 | mute on|off | configure mask cap12 cap34\n"
             "mask: 0=unchanged/return controlled pairs to knob, 1=1–2, 2=3–4, 3=both software.\n"
             "Caps are positive attenuation codes (0..60); level 0/scalar 100 means the caps, not hardware unity.\n"
             "Level must be inside the active driver's advertised range (driver 16: -48..0 dB; minimum selects -127 dB hardware floor).\n"
@@ -85,7 +91,12 @@ int main(int argc, char **argv) {
     if (!device) { std::fputs("Clarett Core Audio device unavailable.\n",stderr); return 1; }
     if (report) { status(device); return 0; }
     OSStatus result;
-    if (configure) {
+    if (mute) {
+        auto p = property(kAudioDevicePropertyMute,kAudioObjectPropertyScopeOutput);
+        if (!AudioObjectHasProperty(device,&p)) { std::fputs("Mute requires driver 17.\n",stderr); return 1; }
+        UInt32 enabled = !std::strcmp(argv[2],"on") ? 1 : 0;
+        result = AudioObjectSetPropertyData(device,&p,0,nullptr,sizeof(enabled),&enabled);
+    } else if (configure) {
         auto p = property(0x636c766f);
         if (!AudioObjectHasProperty(device,&p)) { std::fputs("Output control requires driver 15.\n",stderr); return 1; }
         const void *keys[] = {CFSTR("Enabled12"),CFSTR("Enabled34"),CFSTR("Ceiling12"),CFSTR("Ceiling34")};

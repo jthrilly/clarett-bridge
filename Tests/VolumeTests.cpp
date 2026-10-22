@@ -93,15 +93,15 @@ int main() {
     // Protocol: only exact stereo gain bytes and gain-owner flags, no flash or knob writes.
     for (unsigned off = 0; off < 256; ++off) {
         const auto read = Clarett::volumeRead(4, off, off == 32 || off == 36 ? 2 : 1);
-        const bool allowed = off == 32 || off == 36 || off == 52 || off == 56 || off == 112;
+        const bool allowed = off == 24 || off == 32 || off == 36 || off == 52 || off == 56 || off == 72 || off == 112;
         assert(Clarett::permitted(read, true, true) == allowed);
-        auto write = Clarett::volumeWrite(4, off, 3, 3);
+        auto write = Clarett::volumeWrite(4, off, off == 24 ? 1 : off == 72 ? 0x8f : 3, 3);
         assert(Clarett::permitted(write, true, true) == (allowed && off != 112));
         assert(!Clarett::permitted(write, true, false));
     }
     for (unsigned cmd = 0; cmd < 10; ++cmd) {
         auto r = Clarett::volumeCommit(4, false); Clarett::put32(r.payload, cmd);
-        assert(Clarett::permitted(r, true, true) == (cmd == 1 || cmd == 3));
+        assert(Clarett::permitted(r, true, true) == (cmd == 1 || cmd == 2 || cmd == 3));
     }
     auto bad = Clarett::volumeWrite(4, 32, 128, 0);
     assert(!Clarett::permitted(bad,true,true));

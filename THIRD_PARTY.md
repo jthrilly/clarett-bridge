@@ -17,3 +17,5 @@ The native host uses system SwiftUI, AppKit, IOKit, Core Audio and SystemExtensi
 Focusrite and Clarett are trademarks of their respective owners. This is an independent project without manufacturer affiliation or endorsement.
 
 The output-volume implementation uses the same pinned protocol research for attenuation bytes 32/33 and 36/37, hardware-gain ownership bytes 52/56, live knob byte 112, and volatile commit codes 1 and 3. It does not copy a vendor driver binary or enable flash persistence. The volume safety policy and its tests are implemented in this repository.
+
+Hardware master mute follows the same pinned Clarett protocol research: byte 24 (1 = muted), commit code 2, and the per-output master-mute assignment bitmap at byte 72, commit code 3. Other assignment bits are preserved; the four original 2Pre analogue outputs use bits 0–3. The implementation uses Apple's standard AudioDriverKit Boolean mute control.

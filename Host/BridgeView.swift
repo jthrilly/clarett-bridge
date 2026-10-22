@@ -107,7 +107,7 @@ struct BridgeView: View {
                     Text(controller.audioDeviceAvailable ? "Clarett 2Pre" : "No interface connected").font(.caption)
                 }
                 Text("Independent, experimental driver").font(.system(size: 10)).foregroundStyle(.secondary)
-                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.1")")
+                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.2")")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             }.padding(20)
         }.frame(width: 194).background(Color(nsColor: .underPageBackgroundColor).opacity(0.45))
@@ -212,12 +212,16 @@ struct BridgeView: View {
         Group {
             BridgeCard {
                 HStack {
-                    SectionHeading(icon: "speaker.wave.2", title: "Output volume")
+                    SectionHeading(icon: controller.outputMuted ? "speaker.slash" : "speaker.wave.2", title: "Output volume")
                     Spacer()
+                    Button(controller.outputMuted ? "Unmute" : "Mute", systemImage: controller.outputMuted ? "speaker.wave.2" : "speaker.slash") { controller.toggleMute() }
+                        .buttonStyle(.bordered)
+                        .disabled(!controller.muteAvailable || controller.volumeBusy || controller.volumeUncertain)
+                        .help(controller.outputMuted ? "Unmute at the chosen volume and maximum levels." : "Mute all analogue outputs, including headphones and direct monitoring.")
                     Text("\(Int(controller.outputVolume.rounded()))%")
                         .font(.system(size: 24, weight: .medium, design: .rounded)).monospacedDigit()
                 }
-                Text("Sets the hardware gain for every pair using software control. macOS volume keys use this same control.")
+                Text("Sets the hardware gain for every pair using software control. macOS volume keys use this same control. Mute silences all analogue outputs, including direct monitoring.")
                     .font(.callout).foregroundStyle(.secondary)
                 Slider(value: $controller.outputVolume, in: 0...100) { Text("Output volume") } onEditingChanged: { editing in
                     controller.volumeEditing = editing
@@ -267,7 +271,7 @@ struct BridgeView: View {
                 Button("Apply limits") { controller.configureOutputs() }.buttonStyle(.borderedProminent)
                     .disabled(!controller.volumeAvailable || controller.volumeBusy || controller.volumeUncertain)
             }
-            NoteCard(icon: "speaker.badge.exclamationmark", title: "Start with physical levels down", text: "Limits apply in software mode; new connections leave device controls unchanged. Start with physical levels down. The default maximum is −30 dB; the minimum is −127 dB attenuation, not mute.")
+            NoteCard(icon: "speaker.badge.exclamationmark", title: "Start with physical levels down", text: "Limits apply in software mode; new connections leave gain ownership unchanged. Start with physical levels down. The default maximum is −30 dB; minimum volume uses −127 dB attenuation. Use Mute for silent output.")
         }
     }
     private var audio: some View {

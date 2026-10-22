@@ -47,6 +47,10 @@ For removal, use Deactivate driver and follow any macOS restart instruction. Do 
 
 ## Output levels
 
-Open **Outputs** in app 0.3.1 after activating driver 16. Choose a per-pair maximum (default −30 dB), then explicitly enable software control. The main volume slider and macOS volume keys adjust hardware gains within those maxima. Raising a maximum preserves the current level until you turn the volume up separately. Turn physical levels down for the first test and before returning to knob control. Limits apply only to software-owned pairs; minimum volume is −127 dB attenuation, not mute. Saved limits are applied when you enable control again after a reconnect. See [output volume](output-volume.md) for complete ownership and failure behavior.
+Open **Outputs** in app 0.3.2 after activating driver 17. Choose a per-pair maximum (default −30 dB), then explicitly enable software control. The main volume slider and macOS volume keys adjust hardware gains within those maxima. Raising a maximum preserves the current level until you turn the volume up separately. Turn physical levels down for the first test and before returning to knob control. Limits apply only to software-owned pairs; minimum volume is −127 dB attenuation, not mute. Saved limits are applied when you enable control again after a reconnect. See [output volume](output-volume.md) for complete ownership and failure behavior.
 
 Driver 16 spreads normal volume changes over 48 dB, approximately 3 dB per normal Mac key step. Its zero endpoint selects the −127 dB hardware floor. This makes the useful adjustment range wider than driver 15's full 127 dB exposure. See [slider range](output-volume.md#software-slider-range).
+
+## Mute
+
+The Mac mute key and **Outputs → Mute** silence all four analogue outputs/headphones, including direct monitoring. Mute works in either gain-control mode. Unmute keeps the current chosen volume, checking software gain ownership and capped gains before releasing the hardware master mute. Recording continues while outputs are muted. Turn physical levels down for the first test; use the same button/key again to unmute. See [output volume and mute](output-volume.md#mute) for reconnect and failure handling.

@@ -106,3 +106,10 @@ Tests cover the new midpoint and endpoints, the 1 dB quiet-end quantization boun
 A direct request at the −48 dB control endpoint also selected the 127 dB hardware floor. A below-range preservation case was checked: at 17% scalar, the driver quantized to 40 dB logical attenuation and both gains were −100 dB with −60 dB maxima. Raising pair 1–2's maximum to −50 dB preserved its −100 dB gain, reduced the other pair to −110 dB and reported the standard fader's zero endpoint for the now-50 dB logical attenuation. Explicit scalar zero then selected the −127 dB floor. Both pairs were returned to quiet knob ownership and −30 dB maxima before the user's next test.
 
 All completed checks reported a new revision, no pending work, zero error and no uncertainty. The agent did not start audio. The user then retried Spotify using the app slider and Mac volume keys and confirmed: **the range is better and playback is clean**. This qualifies the reported listening setup; no calibrated electrical/acoustic gain measurement or exhaustive check of every physical output path was made.
+
+
+## Hardware mute update (0.3.2 / driver 17)
+
+The implementation adds the standard Core Audio output/main mute control and an app Mute/Unmute button. Tests cover master-before-assignment ordering, preservation of unrelated assignment bits, retained logical volume, volume/ceiling changes while muted, capped gains before unmute, hardware-knob ownership, initial false no-op, repeated unmute, assignment/ownership conflicts and injected failures at every release step. The command allowlist admits only boolean master mute and assignment writes with all four analogue bits set; dim, knob and flash remain forbidden.
+
+The signed host 18 / driver 17 builds and sanitized tests pass. Activation, live mute command/readback, and a manual Mac mute-key listening test are pending. Hardware master mute and its acoustic effect will be qualified separately from the previously verified attenuation controls.

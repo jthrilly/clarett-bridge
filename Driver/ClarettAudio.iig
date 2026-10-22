@@ -14,11 +14,13 @@ public:
     virtual kern_return_t StartDevice(IOUserAudioObjectID object, IOUserAudioStartStopFlags flags) override;
     virtual kern_return_t StopDevice(IOUserAudioObjectID object, IOUserAudioStartStopFlags flags) override;
     kern_return_t QueueVolumeConfiguration(OSDictionary *settings) LOCALONLY;
+    kern_return_t QueueOutputMute(bool enabled) LOCALONLY;
+    kern_return_t MuteWrite(uint32_t offset, uint8_t value, bool assignment) LOCALONLY;
     kern_return_t QueueOutputAttenuation(uint32_t attenuation) LOCALONLY;
     kern_return_t VolumeRead(uint32_t offset, uint32_t length, uint8_t *data) LOCALONLY;
     kern_return_t VolumeWrite(uint32_t offset, uint8_t first, uint8_t second, bool ownership) LOCALONLY;
     void VolumeStatus(const char *state, uint32_t error = 0) LOCALONLY;
-    kern_return_t QueueVolume(bool custom, bool enabled12, bool enabled34, uint32_t ceiling12, uint32_t ceiling34, uint32_t attenuation) LOCALONLY;
+    kern_return_t QueueVolume(uint32_t kind, bool enabled12, bool enabled34, uint32_t ceiling12, uint32_t ceiling34, uint32_t attenuation, bool muted = false) LOCALONLY;
     kern_return_t QueueMonitorConfiguration(OSDictionary *settings) LOCALONLY;
     kern_return_t QueueTimingConfiguration(OSDictionary *settings) LOCALONLY;
     kern_return_t PerformTimingChange(uint32_t safety) LOCALONLY;
@@ -39,6 +41,7 @@ private:
     void Publish(const char *state, uint64_t code = 0) LOCALONLY;
     kern_return_t ProbeMailbox() LOCALONLY;
     kern_return_t ConfigureAudio() LOCALONLY;
+    kern_return_t InitializeMute() LOCALONLY;
     kern_return_t StartAudio() LOCALONLY;
     void StopAudio() LOCALONLY;
     kern_return_t Command(uint32_t opcode, uint32_t rate) LOCALONLY;

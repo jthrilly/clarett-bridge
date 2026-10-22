@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#ifndef ClarettMute_h
+#define ClarettMute_h
+#include <AudioDriverKit/IOUserAudioBooleanControl.iig>
+using namespace AudioDriverKit;
+class ClarettAudio;
+class ClarettMute : public IOUserAudioBooleanControl {
+public:
+    bool Configure(ClarettAudio *owner) LOCALONLY;
+    virtual void free() override LOCALONLY;
+    virtual kern_return_t HandleChangeControlValue(bool enabled) override LOCALONLY;
+};
+#endif

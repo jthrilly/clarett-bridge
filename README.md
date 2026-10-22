@@ -2,7 +2,7 @@
 
 **An independent macOS driver and control app for the original Focusrite Clarett 2Pre Thunderbolt.**
 
-Clarett Bridge connects this interface to Core Audio through DriverKit and AudioDriverKit. It provides playback, recording, hardware direct monitoring, output volume with per-pair maximum levels, selectable sample rates and adjustable driver margins while keeping Full Security enabled on the tested Mac.
+Clarett Bridge connects this interface to Core Audio through DriverKit and AudioDriverKit. It provides playback, recording, hardware direct monitoring, output mute, output volume with per-pair maximum levels, selectable sample rates and adjustable driver margins while keeping Full Security enabled on the tested Mac.
 
 ## Why this exists
 
@@ -47,7 +47,7 @@ python3 scripts/verify-signing.py 'build/audio/Build/Products/Debug/Clarett Brid
 
 New developers must register their own bundle identifiers and capabilities; see the [complete build and signing guide](docs/building.md). Install the verified app in `/Applications`, open **Driver Setup → Activate driver**, and complete the normal macOS approval flow. Keep Full Security and SIP enabled. Device-management approval policy may differ on other Macs.
 
-Host build 17 (0.3.1) adds an Outputs page and requires activating audio driver version 16 for hardware-backed volume controls. Sample-rate changes require driver 13 or later. Driver 16's volume controls and revised range passed a manual Spotify check. See [validation](docs/validation.md) for the tested scope and remaining checks.
+Host build 18 (0.3.2) adds an Outputs page and requires activating audio driver version 17 for hardware-backed volume controls. Sample-rate changes require driver 13 or later. Driver 16's volume controls and revised range passed a manual Spotify check. See [validation](docs/validation.md) for the tested scope and remaining checks.
 
 ## Use it
 
@@ -66,6 +66,8 @@ Audacity 4.0.1’s software-monitoring path requests its audio library’s high 
 ## Output volume
 
 The **Outputs** page offers software ownership for line outputs 1–2 and 3–4/headphones, with a separate maximum for each pair. The main slider and macOS volume keys use the hardware gain commands. With a −20 dB maximum, **100% software volume remains −20 dB at the hardware**. Limits are enforced in the driver, default to −30 dB, and can be adjusted from −60 to 0 dB. Raising a maximum preserves the current level until you deliberately turn up. Driver 16 uses a 48 dB normal adjustment range (about 3 dB per standard Mac volume-key step), with 0% selecting the quiet hardware floor.
+
+The **Mute** button and Mac mute key use the hardware master mute for all four analogue outputs, including headphones and direct monitoring, in either gain-control mode. Unmute preserves your chosen volume and verifies the capped gains of software-controlled pairs before releasing silence.
 
 Start with physical levels down. New connections leave device controls unchanged until software control is enabled. A return to knob control is refused if its position would make the output jump louder. These limits apply in software mode and are not a calibrated loudness limit. See [output volume and safety](docs/output-volume.md).
 
@@ -95,7 +97,7 @@ zsh scripts/audio-configure.sh buffer 128   # Request; verify actual result
 bash scripts/package-source.sh HEAD         # ZIP and tar.gz of committed source
 ```
 
-CI runs sanitized C++ protocol/ring/mixer/sample-rate/volume-safety tests, checks generated project files, and type-checks the SwiftUI host. It does not sign, activate a driver or validate audio hardware. The project includes no credentials, provisioning profiles, certificates, private keys or device UDIDs.
+CI runs sanitized C++ protocol/ring/mixer/sample-rate/volume-safety/mute tests, checks generated project files, and type-checks the SwiftUI host. It does not sign, activate a driver or validate audio hardware. The project includes no credentials, provisioning profiles, certificates, private keys or device UDIDs.
 
 ## License and provenance
 

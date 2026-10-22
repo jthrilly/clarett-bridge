@@ -45,7 +45,7 @@ struct RenderAssets {
                 let model = BridgeController(preview: true)
                 if disconnected {
                     model.attached = false; model.streaming = false; model.audioDeviceAvailable = false
-                    model.monitorAvailable = false; model.timingAvailable = false; model.rateAvailable = false; model.volumeAvailable = false
+                    model.monitorAvailable = false; model.timingAvailable = false; model.rateAvailable = false; model.volumeAvailable = false; model.muteAvailable = false
                     model.rateOptions = []; model.rateMessage = "Connect the interface to change its sample rate."
                     model.sampleRate = 0; model.actualBuffer = 0; model.actualSafety = 0
                     model.summary = "Connect and power on your Clarett."
@@ -53,7 +53,7 @@ struct RenderAssets {
                 }
                 let root = BridgeView(controller: model, initialPage: page).environment(\.colorScheme, dark ? .dark : .light)
                 let host = NSHostingView(rootView: root)
-                host.frame = NSRect(x: 0, y: 0, width: 1000, height: 740)
+                host.frame = NSRect(x: 0, y: 0, width: 1000, height: page == .outputs ? 800 : 740)
                 let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false; window.contentView = host
                 host.layoutSubtreeIfNeeded(); window.displayIfNeeded()

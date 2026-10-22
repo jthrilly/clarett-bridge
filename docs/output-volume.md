@@ -1,6 +1,6 @@
 # Output volume and maximum levels
 
-Clarett Bridge 0.3.1 adds a hardware-backed Core Audio output volume control and an **Outputs** page. It requires audio driver **16** (host build **17**). Both pairs have passed live command/readback checks, and the user confirmed clean Spotify playback with an improved volume range. See [validation](validation.md) for the exact tested scope and remaining checks.
+Clarett Bridge 0.3.2 adds a hardware-backed Core Audio output volume control and an **Outputs** page. It requires audio driver **17** (host build **18**). Both pairs have passed live command/readback checks, and the user confirmed clean Spotify playback with an improved volume range. See [validation](validation.md) for the exact tested scope and remaining checks.
 
 ![Outputs page](images/outputs.png)
 
@@ -23,7 +23,15 @@ Driver 16 exposes a **48 dB normal adjustment range** through Apple's [AudioDriv
 
 The zero endpoint (and values quantized to it) selects the −127 dB hardware floor. This is a special quiet endpoint rather than a normal −48 dB gain. Quiet takeover and preserved levels after raising a ceiling can also be below the normal span; the standard fader reports its zero endpoint for those levels, while the applied hardware attenuation remains visible in the app and Diagnostics. The driver never turns hardware up merely to fit it inside the normal fader span. An explicit move above zero selects a normal level again.
 
-Minimum software volume selects the device's −127 dB attenuation floor. This is **not a hardware mute**. No master mute/dim or physical headphone-amplifier controls are rewritten. The ceilings govern the interface's digital output gain while software ownership is enabled; they cannot calibrate acoustic loudness or constrain a physical knob after returning control to it.
+Minimum software volume selects the device's −127 dB attenuation floor. This is **not a hardware mute**. The dedicated Mute control uses the master mute; dim and physical headphone-amplifier controls are not rewritten. The ceilings govern the interface's digital output gain while software ownership is enabled; they cannot calibrate acoustic loudness or constrain a physical knob after returning control to it.
+
+## Mute
+
+Driver 17 exposes a standard Core Audio output/main **Mute** control, so the Mac mute key and the app's **Mute / Unmute** button use the same path. It uses the device's master mute, rather than its −127 dB attenuation floor. Mute covers all four analogue outputs and headphones, including hardware direct monitoring, in both software-gain and hardware-knob modes. Capture and the audio stream continue running.
+
+Mute asserts the master flag before adding the four outputs to its assignment bitmap. The driver read-modify-writes that bitmap, preserving every other bit. Volume changes made while muted continue to obey the existing ceilings. Before unmute, the driver verifies all four mute assignments; for each software-controlled pair it also verifies gain ownership and reapplies/reads back the capped gain. Only then does it release master mute. A failed check before release keeps mute asserted. An uncertain release acknowledgement is reported as unknown; further output changes are blocked until recovery. Repeated unmute when already released performs no hardware write.
+
+A new attachment never automatically clears an unknown hardware mute. If a retained master-mute byte is true, the driver safely reasserts mute, verifies the assignments and publishes a muted control. If a legacy saved state leaves the hardware silent but the driver has no confirmed mute ownership, toggle Mute on then off to establish it. Closing the host or stopping the driver does not automatically unmute the interface. The device's cold-start configuration remains separate; no flash save is issued.
 
 ## Hardware protocol and safety boundary
 
@@ -35,12 +43,14 @@ The [protocol research](https://github.com/JustALawnGnome7/clarett-sre/blob/4df0
 | SET_DATA `0x800001`, offsets 32/33 and 36/37 | Stereo output attenuation codes; 0 = unity, 127 = −127 dB |
 | DATA_CMD `0x800002`, code 1 | Apply volatile output gains |
 | SET_DATA, bytes 52 and 56, bits 0/1 | Per-pair hardware-gain ownership; clear for software, set for knob |
-| DATA_CMD, code 3 | Apply volatile ownership flags |
+| DATA_CMD, code 3 | Apply volatile ownership / mute-assignment flags |
+| SET_DATA, offset 24; DATA_CMD, code 2 | Master mute: 1 = muted, 0 = released |
+| GET/SET_DATA, byte 72 | Mute assignments: add bits 0–3 for the four analogue outputs, preserve other bits |
 | GET_DATA, offset 112 | Read the live monitor knob; never written by this driver |
 
 Focusrite also documents assigning outputs to software faders by disabling their monitor-knob assignment in its [Clarett Thunderbolt Control guide, Monitor Controls](https://fael-downloads-prod.focusrite.com/customer/prod/s3fs-public/downloads/Focusrite%20Control%20Clarett%20Thunderbolt%20User%20Guide%20V2.pdf). That corroborates the capability, but does not qualify this implementation's audible behavior.
 
-All requests pass through the driver's serialized mailbox queue. The allowed SET_DATA locations are exactly the two stereo gain pairs and their two ownership bytes. Values and lengths are bounded; only commit codes **1** and **3** are permitted. Flash commit code **5**, writes to the knob, arbitrary config access and other controls remain forbidden. The sample-rate handshake holds the same control-ownership guard, so it cannot interleave with volume commands. No mailbox transactions run in PCM callbacks.
+All requests pass through the driver's serialized mailbox queue. The allowed SET_DATA locations are exactly the two stereo gain pairs, their two gain-ownership bytes, the boolean master-mute byte and the mute-assignment byte. The assignment write must keep all four analogue assignment bits set; its other bits are preserved by a read-modify-write. Values and lengths are bounded; only commit codes **1**, **2** and **3** are permitted. Flash commit code **5**, writes to the knob, arbitrary config access and other controls remain forbidden. The sample-rate handshake holds the same control-ownership guard, so it cannot interleave with volume commands. No mailbox transactions run in PCM callbacks.
 
 The driver stores the ceiling and computes `hardware attenuation = min(127, ceiling attenuation + logical attenuation)` on **every** level change, including standard Core Audio requests. Thus full software volume with a −20 dB ceiling writes code 20, never code 0. The app cannot bypass this by moving its slider or sending a raw control dictionary. NaN/out-of-range values are rejected; fractional dB requests round toward greater attenuation.
 
@@ -52,6 +62,8 @@ The utility never starts audio, records, changes default devices or modifies sec
 
 ```sh
 zsh scripts/output-control.sh status
+zsh scripts/output-control.sh mute on              # Hardware master mute; all analogue outputs
+zsh scripts/output-control.sh mute off             # Only releases a known mute after safety checks
 zsh scripts/output-control.sh configure 1 60 60  # Own pair 1–2 quietly, ceiling −60 dB
 zsh scripts/output-control.sh level 0               # Full logical volume, still at the −60 dB ceiling
 zsh scripts/output-control.sh scalar 50              # Standard Core Audio scalar, like system volume
@@ -59,3 +71,5 @@ zsh scripts/output-control.sh status
 ```
 
 `configure MASK CAP12 CAP34` uses mask 1 for pair 1–2, 2 for pair 3–4, 3 for both, or 0 to return any controlled pairs to the knob. Caps are positive attenuation codes 0–60. Configuration preserves the driver’s current logical volume; only a separate standard level/scalar request can change it. A return to the knob can be refused. Requests are asynchronous: wait for a newer `ClarettVolumeRevision`, `Pending=0`, `Uncertain=0`, `Status=verified`, then check enabled/known flags, ceiling and hardware-attenuation fields. Hardware fields describe the driver's verified gain only for software-enabled pairs with no uncertainty.
+
+Mute readback is reported by `ClarettVolumeMuted` and `ClarettVolumeMuteKnown`, together with the last observed config byte/mask and their read flags. `MuteKnown=0` means this driver has not verified ownership; an initial Core Audio false value is not proof that an unknown saved device state was unmuted. A verified mute has master byte 1 and bits 0–3 set in its assignment mask; a verified unmute has master byte 0.

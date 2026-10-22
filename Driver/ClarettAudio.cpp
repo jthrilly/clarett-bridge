@@ -14,6 +14,8 @@
 #include "ClarettSettings.h"
 #include "ClarettDevice.h"
 #include "ClarettVolume.h"
+#include "ClarettMute.h"
+#include "Mute.hpp"
 #include "Protocol.hpp"
 #include "AudioRing.hpp"
 #include <AudioDriverKit/AudioDriverKit.h>
@@ -58,6 +60,10 @@ struct ClarettAudio_IVars {
     ClarettSettings *settings;
     ClarettSettings *timingSettings, *volumeSettings;
     ClarettVolume *volumeControl;
+    ClarettMute *muteControl;
+    Clarett::Mute::State mute;
+    uint8_t muteByte, muteMask;
+    bool muteByteRead, muteMaskRead;
     Clarett::Volume::State volume;
     uint32_t volumeEnabled, volumePending;
     uint64_t volumeRevision;
@@ -379,6 +385,7 @@ void ClarettAudio::ReleaseAudioObjects() {
     OSSafeReleaseNULL(ivars->timingSettings);
     OSSafeReleaseNULL(ivars->volumeSettings);
     OSSafeReleaseNULL(ivars->volumeControl);
+    OSSafeReleaseNULL(ivars->muteControl);
     // Queues remain alive until free: an in-flight property setter may enqueue
     // a closing-only completion after Stop has drained earlier requests.
     OSSafeReleaseNULL(ivars->timerAction);
@@ -563,6 +570,13 @@ kern_return_t ClarettAudio::ConfigureAudio() {
     ivars->volumeControl = OSTypeAlloc(ClarettVolume);
     if (!ivars->volumeControl || !ivars->volumeControl->Configure(this)) return kIOReturnNoMemory;
     ret = device->AddControl(ivars->volumeControl);
+    if (ret != kIOReturnSuccess) return ret;
+    ivars->mute = Clarett::Mute::State{};
+    ivars->muteControl = OSTypeAlloc(ClarettMute);
+    if (!ivars->muteControl || !ivars->muteControl->Configure(this)) return kIOReturnNoMemory;
+    ret = device->AddControl(ivars->muteControl);
+    if (ret != kIOReturnSuccess) return ret;
+    ret = InitializeMute();
     if (ret != kIOReturnSuccess) return ret;
     VolumeStatus("unchanged");
     MonitorStatus("off");
@@ -1134,7 +1148,12 @@ kern_return_t ClarettAudio::PerformSampleRateChange(double rate) {
 kern_return_t ClarettAudio::VolumeRead(uint32_t offset, uint32_t length, uint8_t *data) {
     if (ivars->failed || __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
     const auto r = Clarett::volumeRead(0, offset, length);
-    return Exchange(r.opcode, r.payload, r.length, r.expectedLength, data, uint16_t(length));
+    const auto ret = Exchange(r.opcode, r.payload, r.length, r.expectedLength, data, uint16_t(length));
+    if (ret == kIOReturnSuccess && length == 1) {
+        if (offset == 24) { ivars->muteByte = data[0]; ivars->muteByteRead = true; }
+        if (offset == 72) { ivars->muteMask = data[0]; ivars->muteMaskRead = true; }
+    }
+    return ret;
 }
 kern_return_t ClarettAudio::VolumeWrite(uint32_t offset, uint8_t first, uint8_t second, bool ownership) {
     if (ivars->failed || __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
@@ -1150,12 +1169,50 @@ kern_return_t ClarettAudio::VolumeWrite(uint32_t offset, uint8_t first, uint8_t 
     if (ret != kIOReturnSuccess) return ret;
     return data[0] == first && (ownership || data[1] == second) ? kIOReturnSuccess : kIOReturnIOError;
 }
+kern_return_t ClarettAudio::MuteWrite(uint32_t offset, uint8_t value, bool assignment) {
+    if (ivars->failed || __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
+    auto r = Clarett::volumeWrite(0, offset, value);
+    auto ret = Exchange(r.opcode, r.payload, r.length, 0, nullptr, 0);
+    if (ret != kIOReturnSuccess) return ret;
+    r = Clarett::muteCommit(0, assignment);
+    ret = Exchange(r.opcode, r.payload, r.length, 0, nullptr, 0);
+    if (ret != kIOReturnSuccess) return ret;
+    uint8_t readback = 0;
+    ret = VolumeRead(offset, 1, &readback);
+    if (ret != kIOReturnSuccess) return ret;
+    return readback == value ? kIOReturnSuccess : kIOReturnIOError;
+}
 namespace {
-class VolumeWire final : public Clarett::Volume::Wire {
+class VolumeWire final : public Clarett::Volume::Wire, public Clarett::Mute::Wire {
     ClarettAudio *owner;
 public:
     kern_return_t error = kIOReturnSuccess;
     explicit VolumeWire(ClarettAudio *driver) : owner(driver) {}
+    bool masterMute(bool enabled) override {
+        error = owner->MuteWrite(24, enabled ? 1 : 0, false);
+        return error == kIOReturnSuccess;
+    }
+    bool assignMute() override {
+        uint8_t flags = 0;
+        error = owner->VolumeRead(72, 1, &flags);
+        if (error != kIOReturnSuccess) return false;
+        // Only add our four analogue outputs; preserve all other bitmap bits.
+        error = owner->MuteWrite(72, flags | Clarett::Mute::AnalogueMask, true);
+        return error == kIOReturnSuccess;
+    }
+    bool muteAssigned() override {
+        uint8_t flags = 0;
+        error = owner->VolumeRead(72, 1, &flags);
+        if (error == kIOReturnSuccess && (flags & Clarett::Mute::AnalogueMask) != Clarett::Mute::AnalogueMask)
+            error = kIOReturnNotReady;
+        return error == kIOReturnSuccess;
+    }
+    bool softwareOwned(unsigned pair) override {
+        uint8_t flags = 0;
+        error = owner->VolumeRead(pair ? 56 : 52, 1, &flags);
+        if (error == kIOReturnSuccess && flags != 0) error = kIOReturnNotReady;
+        return error == kIOReturnSuccess;
+    }
     bool knob(unsigned &attenuation) override {
         uint8_t byte = 0;
         error = owner->VolumeRead(112, 1, &byte); attenuation = byte;
@@ -1177,6 +1234,20 @@ public:
     }
 };
 }
+kern_return_t ClarettAudio::InitializeMute() {
+    uint8_t retained = 0;
+    auto ret = VolumeRead(24, 1, &retained);
+    if (ret != kIOReturnSuccess) return ret;
+    // A retained true value can be safely reasserted (never an automatic
+    // unmute). Verify all four assignments before publishing the muted state.
+    if (retained == 1) {
+        VolumeWire wire(this);
+        if (Clarett::Mute::apply(ivars->mute, ivars->volume, true, wire) != Clarett::Volume::Result::Verified)
+            return wire.error != kIOReturnSuccess ? wire.error : kIOReturnIOError;
+        return ivars->muteControl->SetControlValue(true);
+    }
+    return kIOReturnSuccess;
+}
 void ClarettAudio::VolumeStatus(const char *state, uint32_t error) {
     auto props = OSDictionary::withCapacity(16);
     auto label = OSString::withCString(state);
@@ -1185,6 +1256,12 @@ void ClarettAudio::VolumeStatus(const char *state, uint32_t error) {
         number(props, "ClarettVolumeError", error);
         number(props, "ClarettVolumeRevision", ivars->volumeRevision);
         number(props, "ClarettVolumeRangeDB", Clarett::Volume::ControlRange);
+        number(props, "ClarettVolumeMuted", ivars->mute.enabled);
+        number(props, "ClarettVolumeMuteKnown", ivars->mute.known);
+        number(props, "ClarettVolumeMuteByte", ivars->muteByte);
+        number(props, "ClarettVolumeMuteMask", ivars->muteMask);
+        number(props, "ClarettVolumeMuteByteRead", ivars->muteByteRead);
+        number(props, "ClarettVolumeMuteMaskRead", ivars->muteMaskRead);
         number(props, "ClarettVolumePending", __atomic_load_n(&ivars->volumePending, __ATOMIC_ACQUIRE));
         number(props, "ClarettVolumeUncertain", ivars->volume.uncertain);
         number(props, "ClarettVolumeAttenuation", ivars->volume.settings.attenuation);
@@ -1203,9 +1280,12 @@ void ClarettAudio::VolumeStatus(const char *state, uint32_t error) {
     }
     OSSafeReleaseNULL(label); OSSafeReleaseNULL(props);
 }
+kern_return_t ClarettAudio::QueueOutputMute(bool enabled) {
+    return QueueVolume(2, false, false, 0, 0, 0, enabled);
+}
 kern_return_t ClarettAudio::QueueOutputAttenuation(uint32_t attenuation) {
     if (!__atomic_load_n(&ivars->volumeEnabled, __ATOMIC_ACQUIRE)) return kIOReturnNotReady;
-    return QueueVolume(false, false, false, 0, 0, attenuation);
+    return QueueVolume(0, false, false, 0, 0, attenuation);
 }
 kern_return_t ClarettAudio::QueueVolumeConfiguration(OSDictionary *settings) {
     if (settings->getCount() != 4) return kIOReturnBadArgument;
@@ -1215,11 +1295,11 @@ kern_return_t ClarettAudio::QueueVolumeConfiguration(OSDictionary *settings) {
     auto d = OSDynamicCast(OSNumber, settings->getObject("Ceiling34"));
     if (!a || !b || !c || !d || c->unsigned64BitValue() > Clarett::Volume::MaximumCeiling ||
         d->unsigned64BitValue() > Clarett::Volume::MaximumCeiling) return kIOReturnBadArgument;
-    return QueueVolume(true, a == kOSBooleanTrue, b == kOSBooleanTrue, c->unsigned32BitValue(),
+    return QueueVolume(1, a == kOSBooleanTrue, b == kOSBooleanTrue, c->unsigned32BitValue(),
                        d->unsigned32BitValue(), 0);
 }
-kern_return_t ClarettAudio::QueueVolume(bool custom, bool enabled12, bool enabled34, uint32_t ceiling12, uint32_t ceiling34, uint32_t attenuation) {
-    if (attenuation > Clarett::Volume::Range || (custom && (ceiling12 > 60 || ceiling34 > 60))) return kIOReturnBadArgument;
+kern_return_t ClarettAudio::QueueVolume(uint32_t kind, bool enabled12, bool enabled34, uint32_t ceiling12, uint32_t ceiling34, uint32_t attenuation, bool muted) {
+    if (kind > 2 || attenuation > Clarett::Volume::Range || (kind == 1 && (ceiling12 > 60 || ceiling34 > 60))) return kIOReturnBadArgument;
     if (__atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) || !ivars->controlQueue) return kIOReturnNotReady;
     uint32_t idle = 0;
     if (!__atomic_compare_exchange_n(&ivars->controlPending, &idle, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return kIOReturnBusy;
@@ -1228,22 +1308,24 @@ kern_return_t ClarettAudio::QueueVolume(bool custom, bool enabled12, bool enable
     ivars->controlQueue->DispatchAsync(^{
         VolumeStatus("applying");
         auto next = ivars->volume.settings;
-        if (custom) {
+        if (kind == 1) {
             next.enabled[0] = enabled12; next.enabled[1] = enabled34;
             next.ceiling[0] = ceiling12; next.ceiling[1] = ceiling34;
         }
         // Configuration never supplies a stale logical volume. Only the
         // standard level control changes it, serialized with this request.
-        if (!custom) next.attenuation = attenuation;
+        if (kind == 0) next.attenuation = attenuation;
         VolumeWire wire(this);
         const auto result = __atomic_load_n(&ivars->closing, __ATOMIC_ACQUIRE) || ivars->failed ?
-            Clarett::Volume::Result::Failed : Clarett::Volume::apply(ivars->volume, next, wire);
+            Clarett::Volume::Result::Failed : kind == 2 ? Clarett::Mute::apply(ivars->mute, ivars->volume, muted, wire) :
+            Clarett::Volume::apply(ivars->volume, next, wire);
         __atomic_store_n(&ivars->volumeEnabled, !ivars->volume.uncertain &&
             (ivars->volume.settings.enabled[0] || ivars->volume.settings.enabled[1]), __ATOMIC_RELEASE);
         // This completion runs after the property handler returns. Never wait
         // for the mailbox from a level-control callback: SetDecibelValue uses
         // that control's work queue and would otherwise deadlock.
         if (ivars->volumeControl) ivars->volumeControl->SetDecibelValue(Clarett::Volume::controlDecibels(ivars->volume.settings.attenuation));
+        if (ivars->muteControl) ivars->muteControl->SetControlValue(ivars->mute.enabled);
         ++ivars->volumeRevision;
         __atomic_store_n(&ivars->volumePending, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&ivars->controlPending, 0, __ATOMIC_RELEASE);
