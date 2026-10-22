@@ -34,7 +34,7 @@ plist('Driver/Info.plist', {
     'CFBundleExecutable': '$(EXECUTABLE_NAME)',
     'CFBundleName': '$(PRODUCT_NAME)',
     'CFBundlePackageType': 'DEXT',
-    'CFBundleShortVersionString': '0.2',
+    'CFBundleShortVersionString': '0.3',
     'CFBundleVersion': '$(CURRENT_PROJECT_VERSION)',
     'OSBundleUsageDescription': 'Identify a connected Clarett 2Pre Thunderbolt interface.',
     'IOKitPersonalities': {'ClarettProbe': {
@@ -66,7 +66,7 @@ plist('Host/Info.plist', {
     'LSApplicationCategoryType': 'public.app-category.music',
     'ClarettDriverIdentifier': BUNDLE_PREFIX + '.driver',
     'CFBundlePackageType': 'APPL',
-    'CFBundleShortVersionString': '0.2.0',
+    'CFBundleShortVersionString': '0.3.0',
     'CFBundleVersion': '$(CURRENT_PROJECT_VERSION)',
     'LSMinimumSystemVersion': '$(MACOSX_DEPLOYMENT_TARGET)',
     'NSPrincipalClass': 'NSApplication',
@@ -83,13 +83,14 @@ host_sources = [file('Host/ClarettBridgeApp.swift', 'sourcecode.swift'),
 sources = [file(f'Driver/{CLASS}.cpp', 'sourcecode.cpp.cpp'),
            file(f'Driver/{CLASS}.iig', 'sourcecode.iig')]
 if AUDIO:
-    for name in ['ClarettSettings', 'ClarettDevice']:
+    for name in ['ClarettSettings', 'ClarettDevice', 'ClarettVolume']:
         sources += [file(f'Driver/{name}.cpp', 'sourcecode.cpp.cpp'), file(f'Driver/{name}.iig', 'sourcecode.iig')]
 icon = file('Host/Resources/ClarettBridge.icns', 'image.icns')
 others = [file('Shared/Protocol.hpp', 'sourcecode.cpp.h'),
           file('Shared/AudioRing.hpp', 'sourcecode.cpp.h'),
           file('Shared/SampleRate.hpp', 'sourcecode.cpp.h'),
           file('Shared/Monitor.hpp', 'sourcecode.cpp.h'),
+          file('Shared/Volume.hpp', 'sourcecode.cpp.h'),
           file('Driver/Info.plist', 'text.plist.xml'),
           file('Host/Info.plist', 'text.plist.xml'),
           file('Driver/ClarettProbe.entitlements', 'text.plist.entitlements'),
@@ -105,8 +106,8 @@ common = {
     'GCC_WARN_UNDECLARED_SELECTOR': 'YES', 'GCC_WARN_UNINITIALIZED_AUTOS': 'YES_AGGRESSIVE',
     'ENABLE_USER_SCRIPT_SANDBOXING': 'YES', 'CODE_SIGN_STYLE': 'Automatic',
     'DEVELOPMENT_TEAM': '', 'CODE_SIGN_IDENTITY': 'Apple Development',
-    'CLARETT_PROBE_MODE': MODE, 'CLARETT_DRIVER_VERSION': '13' if AUDIO else '4' if MODE == 'mailbox' else '1',
-    'CLARETT_HOST_VERSION': '14',
+    'CLARETT_PROBE_MODE': MODE, 'CLARETT_DRIVER_VERSION': '15' if AUDIO else '4' if MODE == 'mailbox' else '1',
+    'CLARETT_HOST_VERSION': '16',
 }
 def configs(name, extra):
     entries = []

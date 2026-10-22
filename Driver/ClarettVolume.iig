@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#ifndef ClarettVolume_h
+#define ClarettVolume_h
+#include <AudioDriverKit/IOUserAudioLevelControl.iig>
+using namespace AudioDriverKit;
+class ClarettAudio;
+class ClarettVolume : public IOUserAudioLevelControl {
+public:
+    bool Configure(ClarettAudio *owner) LOCALONLY;
+    virtual void free() override LOCALONLY;
+    virtual kern_return_t HandleChangeDecibelValue(float value) override LOCALONLY;
+    virtual kern_return_t HandleChangeScalarValue(float value) override LOCALONLY;
+};
+#endif

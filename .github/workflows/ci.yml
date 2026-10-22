@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   protocol-tests:
-    name: Sanitized protocol, DMA and mixer tests
+    name: Sanitized protocol, DMA, mixer and volume tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -24,3 +24,5 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - run: xcrun swiftc -typecheck -parse-as-library -module-cache-path build/ModuleCache Host/*.swift
+      - name: Compile output-control diagnostic tool
+        run: xcrun clang++ -std=c++17 -Wall -Wextra -Werror -I Shared Tools/OutputControl.cpp -framework CoreAudio -framework CoreFoundation -framework IOKit -o build/output-control

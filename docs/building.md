@@ -52,7 +52,7 @@ The default build stage is `audio`. Other stages remain useful during hardware r
 
 Build with `scripts/build.sh attach ...` or `scripts/build.sh mailbox ...`. The script regenerates the correct driver source list and entitlements for the selected stage. Changing only a build-mode string does not choose the implementation.
 
-The host build number and driver build number are independent. `CLARETT_HOST_VERSION` controls the host number; `CLARETT_BUILD_VERSION` overrides the selected stage’s driver number when an actual driver update needs a new version. A cosmetic host update does not require incrementing the already tested driver. The sample-rate update uses host build 14 and audio driver build 13; it requires activating the new driver when upgrading from version 12.
+The host build number and driver build number are independent. `CLARETT_HOST_VERSION` controls the host number; `CLARETT_BUILD_VERSION` overrides the selected stage’s driver number when an actual driver update needs a new version. A cosmetic host update does not require incrementing the already tested driver. The output-volume update uses host build 16 (0.3.0) and audio driver build 15 (0.3); activate the new driver to expose output controls. Sample-rate control was introduced in driver 13.
 
 ## Install and update
 

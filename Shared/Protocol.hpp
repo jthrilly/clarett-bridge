@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "Monitor.hpp"
 #include "SampleRate.hpp"
+#include "Volume.hpp"
 
 namespace Clarett {
 constexpr uint32_t Execute = 0x80000000;
@@ -64,8 +65,34 @@ inline Request monitorMuxWrite(uint16_t seq, const uint32_t *routes, uint8_t ban
     for (unsigned i = 0; i < count; ++i) put32(r.payload + 4 + i * 4, routes[i]);
     return r;
 }
+inline Request volumeRead(uint16_t seq, uint32_t offset, uint32_t count) {
+    Request r = {GetData, seq, 8, uint16_t(count), {}};
+    put32(r.payload, offset); put32(r.payload + 4, count); return r;
+}
+inline Request volumeWrite(uint16_t seq, uint32_t offset, uint8_t first, uint8_t second = 0) {
+    const uint32_t count = offset == 32 || offset == 36 ? 2 : 1;
+    Request r = {0x800001, seq, uint16_t(8 + count), 0, {}};
+    put32(r.payload, offset); put32(r.payload + 4, count);
+    r.payload[8] = first; if (count == 2) r.payload[9] = second;
+    return r;
+}
+inline Request volumeCommit(uint16_t seq, bool ownership) {
+    return {0x800002, seq, 4, 0, {uint8_t(ownership ? 3 : 1), 0, 0, 0}};
+}
 inline bool permitted(const Request &r, bool audio = false, bool controls = false) {
     if (controls) {
+        const auto offset = load32(r.payload), count = load32(r.payload + 4);
+        const bool gainPair = (offset == 32 || offset == 36) && count == 2;
+        const bool flags = (offset == 52 || offset == 56) && count == 1;
+        if (r.opcode == GetData && r.length == 8 && r.expectedLength == count &&
+            (gainPair || flags || (offset == 112 && count == 1))) return true;
+        if (r.opcode == 0x800001 && r.length == 8 + count && r.expectedLength == 0 &&
+            ((gainPair && r.payload[8] <= 127 && r.payload[9] <= 127) ||
+             (flags && r.payload[8] <= 3))) return true;
+        // Only volatile gain/ownership commits; flash, master-knob writes and
+        // every unrelated config byte remain outside the allowlist.
+        if (r.opcode == 0x800002 && r.length == 4 && r.expectedLength == 0 &&
+            (offset == 1 || offset == 3)) return true;
         if (r.opcode == 0x003001 && r.length == 4 && r.payload[1] == 0 && r.payload[3] <= 1 &&
             r.payload[2] >= 1 && r.payload[2] <= 28 && unsigned(r.payload[0]) + r.payload[2] <= Monitor::routeCount(r.payload[3]) &&
             r.expectedLength == r.payload[2] * 4) return true;

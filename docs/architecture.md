@@ -47,3 +47,9 @@ The monitor planner snapshots all routes and mixer rows, chooses unused buses an
 ## Validation boundaries
 
 Tests model ordering, response validation, descriptor bounds, page containment, counter wrap, route preservation and command scope. They do not emulate the interface or prove audible quality. Hardware evidence and its limits are tracked in [validation](validation.md). Signed activation does not prove attachment; attachment does not prove audio; counters do not replace a listening or loopback test.
+
+## Hardware-backed output volume
+
+`ClarettVolume` is an output/main AudioDriverKit level control. Scalar requests use the framework's own scalar-to-dB transfer curve, then quantize toward attenuation and enqueue hardware work. The `clvo` custom dictionary accepts exactly two enable booleans and two ceiling attenuation codes (0–60). Configuration preserves the driver’s current logical level; only the standard level control changes it. `Shared/Volume.hpp` enforces ceilings, quiet takeover and no increase when raising a ceiling. Returning ownership requires a sufficiently quiet live knob position. Both paths share the driver's exclusive control guard and serialized mailbox queue; no driver callbacks wait synchronously for the level control's own work queue.
+
+The app polls a completion revision and independent registry status rather than treating property acceptance as application. It uses the standard Core Audio scalar for both slider display and setting, so system volume changes appear in the app. Ceiling preferences are saved after confirmation. Ownership is never automatically assumed on a new driver attachment; boot config readback is not authoritative. See [output-volume.md](output-volume.md) for the exact allowlist, volatile lifetime and limits of this protection.

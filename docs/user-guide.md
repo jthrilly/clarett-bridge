@@ -44,3 +44,7 @@ Diagnostics provides the current report, an explicit refresh and Copy report. Co
 Driver Setup activates or deactivates the installed extension using the normal macOS flow. It does not change startup security, SIP or device-management policy. If activation fails, retain the exact domain/code shown and consult [troubleshooting](troubleshooting.md).
 
 For removal, use Deactivate driver and follow any macOS restart instruction. Do not run `systemextensionsctl reset`, which affects unrelated extensions.
+
+## Output levels
+
+Open **Outputs** in app 0.3.0 after activating driver 15. Choose a per-pair maximum (default −30 dB), then explicitly enable software control. The main volume slider and macOS volume keys adjust hardware gains within those maxima. Raising a maximum preserves the current level until you turn the volume up separately. Turn physical levels down for the first test and before returning to knob control. Limits apply only to software-owned pairs; minimum volume is −127 dB attenuation, not mute. Saved limits are applied when you enable control again after a reconnect. See [output volume](output-volume.md) for complete ownership and failure behavior.

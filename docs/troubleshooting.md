@@ -46,3 +46,7 @@ Version 12 exposes only 48 kHz; activate driver 13 and reconnect the powered int
 Turn direct monitoring off and wait for verified restoration before a rate change. Stop audio in other apps if a request is rejected. Read the active nominal rate, input/output stream formats and `ClarettHardwareSampleRate`, not just the selected value. A DAW can request its own project rate.
 
 If the driver reports a failed or uncertain clock transaction, it may mark the device unavailable. Reconnect or cold power cycle to recover the session; do not keep submitting commands to a poisoned mailbox. Only internal clock and 44.1/48/88.2/96 kHz are implemented. The 14-channel transport has 10 live input slots at double speed.
+
+## Output volume unavailable or refused
+
+Hardware output controls require activating driver 15, not only opening the new host app. On **Outputs**, enable software control explicitly for the desired pair; until then, macOS level requests are refused. Choose a quiet maximum and start with physical levels down. A refused return to knob control means the live monitor knob is above the current software level: turn it fully down and try again. If output state is uncertain, stop audio, turn physical levels down and reconnect; inspect Diagnostics before enabling again. Minimum volume is attenuation rather than hardware mute. Full details are in [output volume](output-volume.md).

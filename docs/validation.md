@@ -61,3 +61,9 @@ Every readback reported a stable rate, zero rate error and an alive, idle device
 These results validate idle clock changes and matching stream metadata, not audible playback/capture or live rate changes during I/O. Manual listening/recording at the new rates is pending. The historical listening results above cover the version 12 / 48 kHz baseline.
 
 The signed local build and sanitizer checks pass. New tests cover strict rate/clock-source allowlists, speed-band read bounds and routing preservation, correct double-speed packet lengths/padding, S/MUX residue suppression, rate-scaled polling, ring-wrap watchdogs and timestamp conversion. The red-accent previews are generated from the real SwiftUI views with example data.
+
+## Output volume update (0.3.0 / driver 15)
+
+The implementation adds the standard Core Audio output/main level control, explicit per-pair software ownership, and driver-enforced ceilings. Sanitized tests cover every supported ceiling/logical attenuation combination, full-volume ceiling mapping, fractional/invalid dB requests, quiet takeover, no level increase on a ceiling raise, refusal of a louder knob handover, failed/uncertain command sequences and exact protocol allowlist boundaries. Flash commits and master-knob writes are rejected.
+
+The host and driver build with the existing development signing configuration. Representative Outputs previews are generated without touching hardware. The signed host 16 / driver 15 is installed. Driver activation/attachment, hardware command readback and manual listening are **pending**; a successful build or a config-byte readback does not qualify audible attenuation, clipping, monitoring or all physical output paths.

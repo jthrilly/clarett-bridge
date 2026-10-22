@@ -3,12 +3,13 @@ import SwiftUI
 import AppKit
 
 enum BridgePage: String, CaseIterable, Identifiable {
-    case overview = "Overview", monitoring = "Monitoring", audio = "Audio Settings", diagnostics = "Diagnostics", setup = "Driver Setup"
+    case overview = "Overview", monitoring = "Monitoring", outputs = "Outputs", audio = "Audio Settings", diagnostics = "Diagnostics", setup = "Driver Setup"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .overview: return "square.grid.2x2"
         case .monitoring: return "headphones"
+        case .outputs: return "speaker.wave.2"
         case .audio: return "slider.horizontal.3"
         case .diagnostics: return "waveform.path.ecg"
         case .setup: return "puzzlepiece.extension"
@@ -18,6 +19,7 @@ enum BridgePage: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "Your Clarett, connected to your Mac."
         case .monitoring: return "Hear your inputs directly through the interface."
+        case .outputs: return "Control hardware output levels with a maximum you choose."
         case .audio: return "Balance responsiveness and reliable playback."
         case .diagnostics: return "Live driver status and troubleshooting details."
         case .setup: return "Install and manage the macOS driver extension."
@@ -62,6 +64,7 @@ struct BridgeView: View {
                         switch page {
                         case .overview: overview
                         case .monitoring: monitoring
+                        case .outputs: outputs
                         case .audio: audio
                         case .diagnostics: diagnostics
                         case .setup: setup
@@ -104,7 +107,7 @@ struct BridgeView: View {
                     Text(controller.audioDeviceAvailable ? "Clarett 2Pre" : "No interface connected").font(.caption)
                 }
                 Text("Independent, experimental driver").font(.system(size: 10)).foregroundStyle(.secondary)
-                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0")")
+                Text("Clarett Bridge · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.3.0")")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             }.padding(20)
         }.frame(width: 194).background(Color(nsColor: .underPageBackgroundColor).opacity(0.45))
@@ -203,6 +206,68 @@ struct BridgeView: View {
                 Text(controller.monitorMessage).font(.caption).foregroundStyle(.secondary).padding(.top, 6).textSelection(.enabled)
             }.disabled(!controller.monitorAvailable || controller.rateBusy || controller.pending)
             NoteCard(icon: "waveform", title: "One monitoring path at a time", text: "Turn off software input monitoring in your audio app when using this hardware mix. To hear software effects, turn direct monitoring off and monitor in the app instead.")
+        }
+    }
+    private var outputs: some View {
+        Group {
+            BridgeCard {
+                HStack {
+                    SectionHeading(icon: "speaker.wave.2", title: "Output volume")
+                    Spacer()
+                    Text("\(Int(controller.outputVolume.rounded()))%")
+                        .font(.system(size: 24, weight: .medium, design: .rounded)).monospacedDigit()
+                }
+                Text("Sets the hardware gain for every pair using software control. macOS volume keys use this same control.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Slider(value: $controller.outputVolume, in: 0...100) { Text("Output volume") } onEditingChanged: { editing in
+                    controller.volumeEditing = editing
+                    if !editing { controller.applyOutputVolume() }
+                }.labelsHidden().disabled(!controller.volumeAvailable || controller.volumeBusy || controller.volumeUncertain || !controller.outputPairs.contains(where: { $0.softwareEnabled }))
+                HStack {
+                    Text("Quietest").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("100% = each pair’s maximum").font(.caption).foregroundStyle(.secondary)
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    if controller.volumeBusy { ProgressView().controlSize(.small) }
+                    Text(controller.volumeMessage).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+            }
+            ForEach(controller.outputPairs.indices, id: \.self) { index in
+                let pair = controller.outputPairs[index]
+                BridgeCard {
+                    HStack {
+                        SectionHeading(icon: index == 0 ? "hifispeaker" : "headphones", title: pair.title)
+                        Spacer()
+                        Text(pair.softwareEnabled ? "Software control" : pair.ownershipKnown ? "Hardware knob" : "Unchanged")
+                            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    }
+                    HStack(alignment: .top, spacing: 22) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Maximum at 100% software volume").font(.callout)
+                            HStack {
+                                Slider(value: $controller.outputPairs[index].ceiling, in: -60...0, step: 1) { Text("Maximum for \(pair.title)") }.labelsHidden()
+                                Text("\(Int(pair.ceiling)) dB").font(.callout.weight(.semibold)).monospacedDigit().frame(width: 55, alignment: .trailing)
+                            }
+                            if pair.softwareEnabled && !controller.volumeUncertain {
+                                Text("Applied: −\(pair.attenuation) dB · Maximum: −\(pair.appliedCeiling) dB")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("The limit applies after software control is enabled.").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Button(pair.softwareEnabled ? "Use hardware knob" : "Enable software control") { controller.configureOutputs(togglePair: index) }
+                            .buttonStyle(.bordered).padding(.top, 3)
+                    }.labelsHidden().disabled(!controller.volumeAvailable || controller.volumeBusy || controller.volumeUncertain)
+                }
+            }
+            HStack {
+                Text("Limits are saved on this Mac after the driver confirms them.").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Apply limits") { controller.configureOutputs() }.buttonStyle(.borderedProminent)
+                    .disabled(!controller.volumeAvailable || controller.volumeBusy || controller.volumeUncertain)
+            }
+            NoteCard(icon: "speaker.badge.exclamationmark", title: "Start with physical levels down", text: "Limits apply in software mode; new connections leave device controls unchanged. Start with physical levels down. The default maximum is −30 dB; the minimum is −127 dB attenuation, not mute.")
         }
     }
     private var audio: some View {

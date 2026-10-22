@@ -15,3 +15,5 @@ The implementation was developed from public protocol research, a public Linux r
 The native host uses system SwiftUI, AppKit, IOKit, Core Audio and SystemExtensions frameworks. The artwork generator and icon are included as source. System symbols are rendered through Apple's APIs. This source release contains no downloaded reference repositories or third-party binary libraries.
 
 Focusrite and Clarett are trademarks of their respective owners. This is an independent project without manufacturer affiliation or endorsement.
+
+The output-volume implementation uses the same pinned protocol research for attenuation bytes 32/33 and 36/37, hardware-gain ownership bytes 52/56, live knob byte 112, and volatile commit codes 1 and 3. It does not copy a vendor driver binary or enable flash persistence. The volume safety policy and its tests are implemented in this repository.

@@ -7,7 +7,7 @@ if command -v xcrun >/dev/null 2>&1; then
 else
   compiler=("${CXX:-clang++}")
 fi
-for suite in Protocol AudioRing Monitor SampleRate; do
+for suite in Protocol AudioRing Monitor SampleRate Volume; do
   "${compiler[@]}" -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined \
     -I Shared "Tests/${suite}Tests.cpp" -o "build/tests/${suite}-tests"
   "build/tests/${suite}-tests"
