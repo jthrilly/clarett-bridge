@@ -47,7 +47,7 @@ python3 scripts/verify-signing.py 'build/audio/Build/Products/Debug/Clarett Brid
 
 New developers must register their own bundle identifiers and capabilities; see the [complete build and signing guide](docs/building.md). Install the verified app in `/Applications`, open **Driver Setup → Activate driver**, and complete the normal macOS approval flow. Keep Full Security and SIP enabled. Device-management approval policy may differ on other Macs.
 
-Host build 17 (0.3.1) adds an Outputs page and requires activating audio driver version 16 for hardware-backed volume controls. Sample-rate changes require driver 13 or later. Driver 15 passed a manual Spotify volume-control check; driver 16 revises its slider range. See [validation](docs/validation.md) for the tested scope and remaining checks.
+Host build 17 (0.3.1) adds an Outputs page and requires activating audio driver version 16 for hardware-backed volume controls. Sample-rate changes require driver 13 or later. Driver 16's volume controls and revised range passed a manual Spotify check. See [validation](docs/validation.md) for the tested scope and remaining checks.
 
 ## Use it
 
