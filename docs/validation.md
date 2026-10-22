@@ -112,4 +112,15 @@ All completed checks reported a new revision, no pending work, zero error and no
 
 The implementation adds the standard Core Audio output/main mute control and an app Mute/Unmute button. Tests cover master-before-assignment ordering, preservation of unrelated assignment bits, retained logical volume, volume/ceiling changes while muted, capped gains before unmute, hardware-knob ownership, initial false no-op, repeated unmute, assignment/ownership conflicts and injected failures at every release step. The command allowlist admits only boolean master mute and assignment writes with all four analogue bits set; dim, knob and flash remain forbidden.
 
-The signed host 18 / driver 17 builds and sanitized tests pass. Activation, live mute command/readback, and a manual Mac mute-key listening test are pending. Hardware master mute and its acoustic effect will be qualified separately from the previously verified attenuation controls.
+The signed host 18 / driver 17 is installed, activated and attached. Sanitized tests and GitHub CI pass. On 22 October 2026, idle hardware checks verified the standard Core Audio mute value against the master byte and all four analogue mute assignments. Both knob-owned and software-owned output modes accepted mute/unmute. Every completed command reported a new revision, zero error, no pending work and no uncertainty.
+
+| Request | Verified result |
+| --- | --- |
+| Mute with both pairs under knob control | Core Audio mute 1, master byte 1, analogue assignment mask 15 |
+| Unmute | Core Audio mute 0 and master byte 0 |
+| Mute at 75% software volume, with both maxima at −60 dB | Logical attenuation stayed 12 dB and both hardware gains stayed −72 dB |
+| Set 50% volume while muted | Master remained 1; both gains became −84 dB |
+| Raise pair 1–2 maximum to −50 dB while muted | Master remained 1; pair 1–2 stayed −84 dB and pair 3–4 became −94 dB |
+| Unmute after those changes | Master became 0; capped gains stayed −84 / −94 dB |
+
+The installed app's Mute and Unmute buttons also produced matching hardware and Core Audio readbacks while retaining the logical volume and maxima. The user's saved configuration was restored: pair 1–2 under software control with a −19 dB maximum, pair 3–4 under knob control, and a 35.4% logical volume (−31 dB relative to the maximum, giving −50 dB on pair 1–2). No audio was started by the validation utility. These checks establish accepted hardware commands and retained limits; the manual Mac mute-key listening test is pending.
